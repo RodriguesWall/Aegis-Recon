@@ -1,47 +1,86 @@
-// Command aegisd is the Aegis-Recon HTTP API daemon. F0 ships only a health
-// endpoint; project/asset/scan routes and the static dashboard land in F2.
+// Command aegisd is the Aegis-Recon HTTP API daemon. It wires the SQLite store,
+// the scan service, an in-memory job queue and the HTTP API, then serves them.
+// On boot it re-enqueues any scans left PENDING by a previous run.
 package main
 
 import (
-	"encoding/json"
+	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
+
+	"github.com/RodriguesWall/aegis-recon/internal/api"
+	"github.com/RodriguesWall/aegis-recon/internal/queue"
+	"github.com/RodriguesWall/aegis-recon/internal/scansvc"
+	"github.com/RodriguesWall/aegis-recon/internal/store/sqlite"
 )
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	addr := os.Getenv("AEGIS_ADDR")
-	if addr == "" {
-		addr = "127.0.0.1:8080"
+	addr := envOr("AEGIS_ADDR", "127.0.0.1:8080")
+	dbPath := envOr("AEGIS_DB", "aegis.db")
+
+	// Root context cancelled on SIGINT/SIGTERM for graceful shutdown.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// Store.
+	st, err := sqlite.Open(dbPath)
+	if err != nil {
+		logger.Error("open store", "err", err)
+		os.Exit(1)
+	}
+	defer st.Close()
+	if err := st.Migrate(ctx); err != nil {
+		logger.Error("migrate", "err", err)
+		os.Exit(1)
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"service": "aegis-recon",
-			"status":  "ok",
-			"time":    time.Now().UTC(),
-		})
-	})
+	// Scan service + queue (workers run the scan lifecycle).
+	svc := scansvc.New(st, logger)
+	q := queue.New(svc.Run, queue.WithWorkers(2), queue.WithLogger(logger))
+	q.Start(ctx)
 
+	// Crash recovery: re-enqueue scans still PENDING from a previous run.
+	if pending, err := st.ListPendingScans(ctx); err == nil {
+		for _, sc := range pending {
+			q.Enqueue(sc.ID)
+		}
+		if len(pending) > 0 {
+			logger.Info("re-enqueued pending scans", "count", len(pending))
+		}
+	}
+
+	// HTTP server.
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           api.New(st, q).Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	logger.Info("aegisd starting", "addr", addr)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+
+	logger.Info("aegisd starting", "addr", addr, "db", dbPath)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("server stopped", "err", err)
 		os.Exit(1)
 	}
+	logger.Info("aegisd stopped")
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }

@@ -147,6 +147,20 @@ func (s *Store) CreateAsset(ctx context.Context, a *model.Asset) error {
 	return err
 }
 
+func (s *Store) GetAsset(ctx context.Context, id string) (*model.Asset, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, project_id, type, name, scope, created_at FROM assets WHERE id = ?`, id)
+	var a model.Asset
+	var scope string
+	if err := row.Scan(&a.ID, &a.ProjectID, &a.Type, &a.Name, &scope, &a.CreatedAt); err != nil {
+		return nil, err
+	}
+	if scope != "" {
+		a.Scope = strings.Split(scope, ",")
+	}
+	return &a, nil
+}
+
 func (s *Store) ListAssets(ctx context.Context, projectID string) ([]model.Asset, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, project_id, type, name, scope, created_at FROM assets WHERE project_id = ? ORDER BY created_at DESC`,
@@ -197,6 +211,41 @@ func (s *Store) GetScan(ctx context.Context, id string) (*model.Scan, error) {
 		return nil, err
 	}
 	return &sc, nil
+}
+
+func (s *Store) ListScans(ctx context.Context, assetID string) ([]model.Scan, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, asset_id, type, status, created_at, started_at, completed_at, error
+		 FROM scans WHERE asset_id = ? ORDER BY created_at DESC`, assetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanRows(rows)
+}
+
+func (s *Store) ListPendingScans(ctx context.Context) ([]model.Scan, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, asset_id, type, status, created_at, started_at, completed_at, error
+		 FROM scans WHERE status = ? ORDER BY created_at`, model.StatusPending)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanRows(rows)
+}
+
+// scanRows decodes a scans result set.
+func scanRows(rows *sql.Rows) ([]model.Scan, error) {
+	var out []model.Scan
+	for rows.Next() {
+		var sc model.Scan
+		if err := rows.Scan(&sc.ID, &sc.AssetID, &sc.Type, &sc.Status, &sc.CreatedAt, &sc.StartedAt, &sc.CompletedAt, &sc.Error); err != nil {
+			return nil, err
+		}
+		out = append(out, sc)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) SaveFindings(ctx context.Context, scanID string, fs []model.Finding) error {
