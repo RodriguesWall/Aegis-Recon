@@ -16,7 +16,9 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/fingerprint"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/httpprobe"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/port"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/subdomain"
 	tlsscan "github.com/RodriguesWall/aegis-recon/internal/scanner/tls"
+	"github.com/RodriguesWall/aegis-recon/internal/scope"
 )
 
 func main() {
@@ -26,8 +28,16 @@ func main() {
 	}
 	domain := os.Args[2]
 
-	resolver := &net.Resolver{}
+	// PreferGo uses the pure-Go resolver instead of the system cgo resolver,
+	// which can crash on macOS under many concurrent lookups.
+	resolver := &net.Resolver{PreferGo: true}
 	dialer := &net.Dialer{}
+
+	// Phase 1 discoverers.
+	discoverers := []model.Discoverer{
+		subdomain.New(resolver),
+	}
+	// Phase 2 scanners.
 	eng := engine.New([]model.Scanner{
 		dns.New(resolver),
 		port.New(dialer),
@@ -35,9 +45,10 @@ func main() {
 		httpprobe.New(),
 		fingerprint.New(),
 	})
-	targets := []model.Target{{Domain: domain, Host: domain, Port: 443}}
+	// Safety gate: only probe hosts within the domain's scope.
+	sc := scope.New(domain)
 
-	result := eng.Run(context.Background(), domain, targets)
+	result := eng.RunPipeline(context.Background(), domain, discoverers, sc.Filter)
 
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")

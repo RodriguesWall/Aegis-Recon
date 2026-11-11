@@ -48,6 +48,42 @@ func (e *Engine) Run(ctx context.Context, domain string, targets []model.Target)
 	var (
 		mu       sync.Mutex
 		findings []model.Finding
+	)
+	emit := func(f model.Finding) {
+		mu.Lock()
+		findings = append(findings, f)
+		mu.Unlock()
+	}
+
+	errs := e.fanout(ctx, targets, emit)
+
+	end := time.Now()
+	return model.ScanResult{
+		Domain:   domain,
+		Findings: findings,
+		Meta: model.ScanMeta{
+			StartedAt: start,
+			EndedAt:   end,
+			Duration:  end.Sub(start),
+			Scanners:  scannerNames(e.scanners),
+			Errors:    errs,
+		},
+	}
+}
+
+// HostFilter optionally normalizes and filters discovered hosts before the
+// probe phase (e.g. scope.Filter — drops off-scope/duplicate hosts).
+type HostFilter func([]string) []string
+
+// RunPipeline runs discovery (phase 1) then probing (phase 2). Discoverers
+// expand the domain into hosts; filter trims them to scope; then every scanner
+// runs against every in-scope host. The root domain is always included.
+func (e *Engine) RunPipeline(ctx context.Context, domain string, discoverers []model.Discoverer, filter HostFilter) model.ScanResult {
+	start := time.Now()
+
+	var (
+		mu       sync.Mutex
+		findings []model.Finding
 		errs     []string
 	)
 	emit := func(f model.Finding) {
@@ -56,6 +92,65 @@ func (e *Engine) Run(ctx context.Context, domain string, targets []model.Target)
 		mu.Unlock()
 	}
 
+	// Phase 1: discovery (sequential; usually a single discoverer).
+	hostSet := map[string]bool{domain: true}
+	for _, d := range discoverers {
+		hosts, err := d.Discover(ctx, domain)
+		if err != nil {
+			errs = append(errs, d.Name()+": "+err.Error())
+			continue
+		}
+		for _, h := range hosts {
+			hostSet[h] = true
+		}
+	}
+
+	hosts := make([]string, 0, len(hostSet))
+	for h := range hostSet {
+		hosts = append(hosts, h)
+	}
+	if filter != nil {
+		hosts = filter(hosts)
+	}
+
+	// Record each in-scope host and build the probe targets.
+	targets := make([]model.Target, 0, len(hosts))
+	for _, h := range hosts {
+		emit(model.Finding{
+			Scanner:  "discovery",
+			Target:   model.Target{Domain: domain, Host: h},
+			Severity: model.SeverityInfo,
+			Title:    "host in scope",
+			Evidence: map[string]any{"host": h},
+		})
+		targets = append(targets, model.Target{Domain: domain, Host: h, Port: 443})
+	}
+
+	// Phase 2: probe every host with every scanner.
+	errs = append(errs, e.fanout(ctx, targets, emit)...)
+
+	end := time.Now()
+	return model.ScanResult{
+		Domain:   domain,
+		Findings: findings,
+		Meta: model.ScanMeta{
+			StartedAt: start,
+			EndedAt:   end,
+			Duration:  end.Sub(start),
+			Scanners:  scannerNames(e.scanners),
+			Errors:    errs,
+		},
+	}
+}
+
+// fanout runs every scanner against every target with bounded concurrency,
+// emitting findings through emit. It returns the collected scanner errors.
+// Shared by Run (single-phase) and RunPipeline (phase 2).
+func (e *Engine) fanout(ctx context.Context, targets []model.Target, emit model.EmitFunc) []string {
+	var (
+		mu   sync.Mutex
+		errs []string
+	)
 	sem := make(chan struct{}, e.concurrency)
 	var wg sync.WaitGroup
 
@@ -75,19 +170,7 @@ func (e *Engine) Run(ctx context.Context, domain string, targets []model.Target)
 		}
 	}
 	wg.Wait()
-
-	end := time.Now()
-	return model.ScanResult{
-		Domain:   domain,
-		Findings: findings,
-		Meta: model.ScanMeta{
-			StartedAt: start,
-			EndedAt:   end,
-			Duration:  end.Sub(start),
-			Scanners:  scannerNames(e.scanners),
-			Errors:    errs,
-		},
-	}
+	return errs
 }
 
 func scannerNames(ss []model.Scanner) []string {
