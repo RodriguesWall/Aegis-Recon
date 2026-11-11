@@ -13,7 +13,9 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/engine"
 	"github.com/RodriguesWall/aegis-recon/internal/model"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/dns"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/fingerprint"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/httpprobe"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/port"
 	tlsscan "github.com/RodriguesWall/aegis-recon/internal/scanner/tls"
 )
 
@@ -25,10 +27,13 @@ func main() {
 	domain := os.Args[2]
 
 	resolver := &net.Resolver{}
+	dialer := &net.Dialer{}
 	eng := engine.New([]model.Scanner{
 		dns.New(resolver),
+		port.New(dialer),
 		tlsscan.New(),
 		httpprobe.New(),
+		fingerprint.New(),
 	})
 	targets := []model.Target{{Domain: domain, Host: domain, Port: 443}}
 
