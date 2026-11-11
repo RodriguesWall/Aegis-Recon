@@ -7,11 +7,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 
 	"github.com/RodriguesWall/aegis-recon/internal/engine"
 	"github.com/RodriguesWall/aegis-recon/internal/model"
-	"github.com/RodriguesWall/aegis-recon/internal/scanner/noop"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/dns"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/httpprobe"
+	tlsscan "github.com/RodriguesWall/aegis-recon/internal/scanner/tls"
 )
 
 func main() {
@@ -21,8 +24,13 @@ func main() {
 	}
 	domain := os.Args[2]
 
-	eng := engine.New([]model.Scanner{noop.New()})
-	targets := []model.Target{{Domain: domain, Host: domain}}
+	resolver := &net.Resolver{}
+	eng := engine.New([]model.Scanner{
+		dns.New(resolver),
+		tlsscan.New(),
+		httpprobe.New(),
+	})
+	targets := []model.Target{{Domain: domain, Host: domain, Port: 443}}
 
 	result := eng.Run(context.Background(), domain, targets)
 
