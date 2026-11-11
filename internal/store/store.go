@@ -20,11 +20,14 @@ type Store interface {
 	ListProjects(ctx context.Context) ([]model.Project, error)
 
 	CreateAsset(ctx context.Context, a *model.Asset) error
+	GetAsset(ctx context.Context, id string) (*model.Asset, error)
 	ListAssets(ctx context.Context, projectID string) ([]model.Asset, error)
 
 	CreateScan(ctx context.Context, s *model.Scan) error
 	UpdateScan(ctx context.Context, s *model.Scan) error
 	GetScan(ctx context.Context, id string) (*model.Scan, error)
+	ListScans(ctx context.Context, assetID string) ([]model.Scan, error)
+	ListPendingScans(ctx context.Context) ([]model.Scan, error)
 
 	SaveFindings(ctx context.Context, scanID string, fs []model.Finding) error
 	ListFindings(ctx context.Context, scanID string) ([]model.Finding, error)

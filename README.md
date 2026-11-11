@@ -71,17 +71,24 @@ No external scan engines in V1 — pure Go standard library (`net`, `crypto/tls`
 ## Build & run
 
 ```bash
-# build
+# build the Go binaries
 make build
 
 # scan from the CLI
 ./bin/aegis scan example.com
 
-# run the API + dashboard
-./bin/aegisd        # http://localhost:8080
+# run the API daemon
+./bin/aegisd                 # http://localhost:8080  (GET /health)
+
+# run the dashboard (dev) — in another terminal
+cd web && npm install && npm run dev   # http://localhost:5173
 ```
 
-> Docker and detailed usage land as V1 modules are implemented.
+Or bring up API + dashboard together with Docker:
+
+```bash
+docker compose up --build    # web on :8081, api on :8080
+```
 
 ---
 

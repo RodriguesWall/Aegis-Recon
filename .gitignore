@@ -37,3 +37,12 @@ docs/
 
 # Binarios compilados
 /bin/
+
+# SQLite db local
+*.db
+*.db-wal
+*.db-shm
+
+# Front (web/)
+web/node_modules/
+web/dist/

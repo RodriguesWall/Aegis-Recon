@@ -70,6 +70,16 @@ func (s *Store) CreateAsset(_ context.Context, a *model.Asset) error {
 	return nil
 }
 
+func (s *Store) GetAsset(_ context.Context, id string) (*model.Asset, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	a, ok := s.assets[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return &a, nil
+}
+
 func (s *Store) ListAssets(_ context.Context, projectID string) ([]model.Asset, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -107,6 +117,30 @@ func (s *Store) GetScan(_ context.Context, id string) (*model.Scan, error) {
 		return nil, ErrNotFound
 	}
 	return &sc, nil
+}
+
+func (s *Store) ListScans(_ context.Context, assetID string) ([]model.Scan, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []model.Scan
+	for _, sc := range s.scans {
+		if sc.AssetID == assetID {
+			out = append(out, sc)
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) ListPendingScans(_ context.Context) ([]model.Scan, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []model.Scan
+	for _, sc := range s.scans {
+		if sc.Status == model.StatusPending {
+			out = append(out, sc)
+		}
+	}
+	return out, nil
 }
 
 func (s *Store) SaveFindings(_ context.Context, scanID string, fs []model.Finding) error {

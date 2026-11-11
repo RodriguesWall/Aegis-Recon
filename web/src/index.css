@@ -1,0 +1,87 @@
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    @apply bg-background text-white font-sans;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  body {
+    min-height: 100vh;
+    position: relative;
+  }
+  /* Dot-grid texture (ported from pentest-landing). */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image: radial-gradient(
+      circle at 2px 2px,
+      rgba(255, 255, 255, 0.05) 1px,
+      transparent 0
+    );
+    background-size: 32px 32px;
+    pointer-events: none;
+    z-index: -1;
+  }
+  h1, h2, h3, h4 {
+    @apply font-bold tracking-tight;
+    line-height: 1.1;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply rounded-2xl border p-6 transition-all;
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(12px);
+  }
+  .glass-card:hover {
+    border-color: rgba(139, 92, 246, 0.3);
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, #8b5cf6, #06b6d4);
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 font-semibold transition-all;
+    cursor: pointer;
+  }
+  .btn-primary {
+    @apply btn text-white;
+    background: #8b5cf6;
+    box-shadow: 0 4px 20px rgba(139, 92, 246, 0.4);
+  }
+  .btn-primary:hover {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+  }
+  .btn-accent {
+    @apply btn;
+    background: #9ef01a;
+    color: #000;
+    box-shadow: 0 4px 20px rgba(158, 240, 26, 0.4);
+  }
+  .btn-ghost {
+    @apply btn border;
+    border-color: rgba(255, 255, 255, 0.12);
+    background: transparent;
+    color: #fff;
+  }
+  .input {
+    @apply w-full rounded-xl border px-4 py-2.5 outline-none;
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: #fff;
+  }
+  .input:focus {
+    border-color: rgba(139, 92, 246, 0.5);
+  }
+}
