@@ -31,3 +31,9 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Planejamento interno (local, nao versionado)
+docs/
+
+# Binarios compilados
+/bin/
