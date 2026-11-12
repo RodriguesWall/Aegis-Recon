@@ -20,7 +20,7 @@ export function CardMenu({ items }: { items: MenuItem[] }) {
   return (
     <div ref={ref} className="relative" onClick={(e) => e.stopPropagation()}>
       <button
-        aria-label="opções"
+        aria-label="options"
         className="rounded-lg p-2 text-muted transition-colors hover:bg-white/10 hover:text-white"
         onClick={() => setOpen((o) => !o)}
       >

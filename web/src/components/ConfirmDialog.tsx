@@ -6,7 +6,7 @@ import { useState } from "react"
 export function ConfirmDialog({
   title,
   message,
-  confirmLabel = "Excluir",
+  confirmLabel = "Delete",
   onConfirm,
   onCancel,
 }: {
@@ -31,7 +31,7 @@ export function ConfirmDialog({
         <p className="mb-4 text-sm text-muted">{message}</p>
         <div className="flex justify-end gap-2">
           <button className="btn-ghost" disabled={busy} onClick={onCancel}>
-            Cancelar
+            Cancel
           </button>
           <button
             className="btn text-white"
