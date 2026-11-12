@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useParams } from "react-router-dom"
 import { api } from "../api/client"
 import { SeverityBadge, severityRank } from "../components/SeverityBadge"
+import { StatusPill } from "../components/StatusPill"
 import type { Finding, ScanResult } from "../types"
 
 const POLL_MS = 2000
@@ -70,9 +71,9 @@ export function ScanDetail() {
         <h1 className="text-3xl">
           <span className="gradient-text">Scan</span>
         </h1>
-        <p className="text-muted">
-          Status: <span className="text-white">{scan.status}</span>
-          {running && <span className="ml-2 animate-pulse">●</span>}
+        <p className="flex items-center gap-2 text-muted">
+          Status: <StatusPill status={scan.status} />
+          {running && <span className="animate-pulse">●</span>}
         </p>
       </div>
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { api } from "../api/client"
 import { EditableName } from "../components/EditableName"
+import { StatusPill } from "../components/StatusPill"
 import type { Asset, Scan } from "../types"
 
 export function ProjectDetail() {
@@ -99,17 +100,27 @@ export function ProjectDetail() {
               </button>
             </div>
             {(scansByAsset[a.id]?.length ?? 0) > 0 && (
-              <div className="mt-4 space-y-1 border-t border-white/10 pt-3">
-                {scansByAsset[a.id].map((s) => (
-                  <Link
-                    key={s.id}
-                    to={`/scans/${s.id}`}
-                    className="flex justify-between text-sm text-muted hover:text-white"
-                  >
-                    <span>{new Date(s.created_at).toLocaleString()}</span>
-                    <span>{s.status}</span>
-                  </Link>
-                ))}
+              <div className="mt-4 border-t border-white/10 pt-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                  Scans anteriores — clique para ver o report
+                </p>
+                <div className="space-y-2">
+                  {scansByAsset[a.id].map((s) => (
+                    <Link
+                      key={s.id}
+                      to={`/scans/${s.id}`}
+                      className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm transition-colors hover:border-primary/40 hover:bg-white/10"
+                    >
+                      <span className="flex items-center gap-2">
+                        <StatusPill status={s.status} />
+                        <span className="text-muted">
+                          {new Date(s.created_at).toLocaleString()}
+                        </span>
+                      </span>
+                      <span className="text-primary">ver report →</span>
+                    </Link>
+                  ))}
+                </div>
               </div>
             )}
           </div>
