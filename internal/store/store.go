@@ -33,6 +33,8 @@ type Store interface {
 	CreateScan(ctx context.Context, s *model.Scan) error
 	UpdateScan(ctx context.Context, s *model.Scan) error
 	GetScan(ctx context.Context, id string) (*model.Scan, error)
+	// DeleteScan removes the scan and its findings.
+	DeleteScan(ctx context.Context, id string) error
 	ListScans(ctx context.Context, assetID string) ([]model.Scan, error)
 	ListPendingScans(ctx context.Context) ([]model.Scan, error)
 	ListProcessingScans(ctx context.Context) ([]model.Scan, error)

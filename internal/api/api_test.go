@@ -149,6 +149,20 @@ func TestDeleteProjectAndAsset(t *testing.T) {
 	}
 }
 
+func TestDeleteScan(t *testing.T) {
+	h := newServer()
+	pid := idOf(t, do(t, h, "POST", "/api/projects", `{"name":"p"}`))
+	aid := idOf(t, do(t, h, "POST", "/api/projects/"+pid+"/assets", `{"name":"a.com"}`))
+	sid := idOf(t, do(t, h, "POST", "/api/assets/"+aid+"/scans", ""))
+
+	if w := do(t, h, "DELETE", "/api/scans/"+sid, ""); w.Code != http.StatusNoContent {
+		t.Fatalf("delete scan: %d", w.Code)
+	}
+	if w := do(t, h, "GET", "/api/scans/"+sid, ""); w.Code != http.StatusNotFound {
+		t.Fatalf("scan still present: %d", w.Code)
+	}
+}
+
 func TestDeleteMissing(t *testing.T) {
 	h := newServer()
 	if w := do(t, h, "DELETE", "/api/projects/nope", ""); w.Code != http.StatusNotFound {

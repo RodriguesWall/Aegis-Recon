@@ -325,6 +325,24 @@ func scanRows(rows *sql.Rows) ([]model.Scan, error) {
 	return out, rows.Err()
 }
 
+// DeleteScan removes the scan and its findings in one transaction.
+func (s *Store) DeleteScan(ctx context.Context, id string) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM findings WHERE scan_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM scans WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) SaveFindings(ctx context.Context, scanID string, fs []model.Finding) error {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()

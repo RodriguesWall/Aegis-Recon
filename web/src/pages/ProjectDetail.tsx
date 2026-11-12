@@ -96,6 +96,7 @@ function AssetCard({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(asset.name)
   const [confirm, setConfirm] = useState(false)
+  const [scanToDelete, setScanToDelete] = useState<string | null>(null)
 
   async function save() {
     const n = draft.trim()
@@ -168,7 +169,19 @@ function AssetCard({
                   <StatusPill status={s.status} />
                   <span className="text-muted">{new Date(s.created_at).toLocaleString()}</span>
                 </span>
-                <span className="text-primary">ver report →</span>
+                <span className="flex items-center gap-3">
+                  <span className="text-primary">ver report →</span>
+                  <button
+                    className="text-xs text-muted hover:text-sev-critical"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setScanToDelete(s.id)
+                    }}
+                  >
+                    excluir
+                  </button>
+                </span>
               </Link>
             ))}
           </div>
@@ -183,6 +196,19 @@ function AssetCard({
           onConfirm={async () => {
             await api.deleteAsset(asset.id)
             setConfirm(false)
+            onChanged()
+          }}
+        />
+      )}
+
+      {scanToDelete && (
+        <ConfirmDialog
+          title="Excluir scan"
+          message="Excluir este scan e seus findings? Esta ação não pode ser desfeita."
+          onCancel={() => setScanToDelete(null)}
+          onConfirm={async () => {
+            await api.deleteScan(scanToDelete)
+            setScanToDelete(null)
             onChanged()
           }}
         />

@@ -43,6 +43,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/assets/{id}/scans", s.createScan)
 	mux.HandleFunc("GET /api/assets/{id}/scans", s.listScans)
 	mux.HandleFunc("GET /api/scans/{id}", s.getScan)
+	mux.HandleFunc("DELETE /api/scans/{id}", s.deleteScan)
 	return cors(mux)
 }
 
@@ -258,6 +259,19 @@ func (s *Server) getScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"scan": scan, "findings": findings})
+}
+
+func (s *Server) deleteScan(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := s.store.GetScan(r.Context(), id); err != nil {
+		writeErr(w, http.StatusNotFound, "scan not found")
+		return
+	}
+	if err := s.store.DeleteScan(r.Context(), id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---- helpers ----

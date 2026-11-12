@@ -202,6 +202,14 @@ func (s *Store) listByStatus(status model.ScanStatus) ([]model.Scan, error) {
 	return out, nil
 }
 
+func (s *Store) DeleteScan(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.findings, id)
+	delete(s.scans, id)
+	return nil
+}
+
 func (s *Store) SaveFindings(_ context.Context, scanID string, fs []model.Finding) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

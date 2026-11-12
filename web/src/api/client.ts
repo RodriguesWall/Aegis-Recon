@@ -45,4 +45,5 @@ export const api = {
   createScan: (assetID: string) =>
     req<Scan>(`/assets/${assetID}/scans`, { method: "POST" }),
   getScan: (scanID: string) => req<ScanResult>(`/scans/${scanID}`),
+  deleteScan: (scanID: string) => req<void>(`/scans/${scanID}`, { method: "DELETE" }),
 }
