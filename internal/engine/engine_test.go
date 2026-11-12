@@ -61,6 +61,29 @@ func TestRun_RecordsScannerError(t *testing.T) {
 	}
 }
 
+func TestRun_HostGateSkipsBlockedHost(t *testing.T) {
+	eng := engine.New([]model.Scanner{fakeScanner{name: "a", n: 1}},
+		engine.WithHostGate(func(_ context.Context, host string) error {
+			if host == "blocked.com" {
+				return errors.New("rate limited")
+			}
+			return nil
+		}))
+
+	res := eng.Run(context.Background(), "x", []model.Target{
+		{Host: "ok.com"},
+		{Host: "blocked.com"},
+	})
+
+	// ok.com passes the gate and emits 1 finding; blocked.com is skipped.
+	if len(res.Findings) != 1 {
+		t.Fatalf("findings = %d, want 1", len(res.Findings))
+	}
+	if len(res.Meta.Errors) != 1 {
+		t.Fatalf("errors = %v, want 1 (gate)", res.Meta.Errors)
+	}
+}
+
 func TestRun_NoopScanner(t *testing.T) {
 	eng := engine.New([]model.Scanner{noop.New()})
 	res := eng.Run(context.Background(), "example.com", []model.Target{{Domain: "example.com", Host: "example.com"}})

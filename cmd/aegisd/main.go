@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/RodriguesWall/aegis-recon/internal/api"
+	"github.com/RodriguesWall/aegis-recon/internal/model"
 	"github.com/RodriguesWall/aegis-recon/internal/queue"
 	"github.com/RodriguesWall/aegis-recon/internal/scansvc"
 	"github.com/RodriguesWall/aegis-recon/internal/store/sqlite"
@@ -46,7 +47,20 @@ func main() {
 	q := queue.New(svc.Run, queue.WithWorkers(2), queue.WithLogger(logger))
 	q.Start(ctx)
 
-	// Crash recovery: re-enqueue scans still PENDING from a previous run.
+	// Crash recovery. Scans left PROCESSING (crash mid-run) are reset to PENDING
+	// first, then every PENDING scan is re-enqueued.
+	if stuck, err := st.ListProcessingScans(ctx); err == nil {
+		for _, sc := range stuck {
+			sc.Status = model.StatusPending
+			sc.StartedAt = nil
+			if e := st.UpdateScan(ctx, &sc); e != nil {
+				logger.Error("reset stuck scan", "scan", sc.ID, "err", e)
+			}
+		}
+		if len(stuck) > 0 {
+			logger.Info("reset stuck PROCESSING scans", "count", len(stuck))
+		}
+	}
 	if pending, err := st.ListPendingScans(ctx); err == nil {
 		for _, sc := range pending {
 			q.Enqueue(sc.ID)

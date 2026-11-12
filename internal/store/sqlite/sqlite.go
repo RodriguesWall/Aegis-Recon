@@ -225,9 +225,17 @@ func (s *Store) ListScans(ctx context.Context, assetID string) ([]model.Scan, er
 }
 
 func (s *Store) ListPendingScans(ctx context.Context) ([]model.Scan, error) {
+	return s.listByStatus(ctx, model.StatusPending)
+}
+
+func (s *Store) ListProcessingScans(ctx context.Context) ([]model.Scan, error) {
+	return s.listByStatus(ctx, model.StatusProcessing)
+}
+
+func (s *Store) listByStatus(ctx context.Context, status model.ScanStatus) ([]model.Scan, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, asset_id, type, status, created_at, started_at, completed_at, error
-		 FROM scans WHERE status = ? ORDER BY created_at`, model.StatusPending)
+		 FROM scans WHERE status = ? ORDER BY created_at`, status)
 	if err != nil {
 		return nil, err
 	}

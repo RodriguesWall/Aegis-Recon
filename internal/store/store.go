@@ -28,6 +28,7 @@ type Store interface {
 	GetScan(ctx context.Context, id string) (*model.Scan, error)
 	ListScans(ctx context.Context, assetID string) ([]model.Scan, error)
 	ListPendingScans(ctx context.Context) ([]model.Scan, error)
+	ListProcessingScans(ctx context.Context) ([]model.Scan, error)
 
 	SaveFindings(ctx context.Context, scanID string, fs []model.Finding) error
 	ListFindings(ctx context.Context, scanID string) ([]model.Finding, error)

@@ -11,10 +11,17 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/model"
 )
 
+// HostGate is called before each probe with the target host. It can block
+// (rate limit) or return an error to skip that probe. scope.RateLimiter.Wait
+// satisfies it. Kept as a func so the engine stays decoupled from the scope
+// package.
+type HostGate func(ctx context.Context, host string) error
+
 // Engine runs a set of scanners against a set of targets.
 type Engine struct {
 	scanners    []model.Scanner
 	concurrency int
+	gate        HostGate
 }
 
 // Option configures an Engine.
@@ -29,6 +36,12 @@ func WithConcurrency(n int) Option {
 		}
 		e.concurrency = n
 	}
+}
+
+// WithHostGate installs a gate called before every probe (e.g. a per-host rate
+// limiter). A gate error skips that probe and is recorded.
+func WithHostGate(g HostGate) Option {
+	return func(e *Engine) { e.gate = g }
 }
 
 // New builds an Engine from the given scanners.
@@ -161,6 +174,19 @@ func (e *Engine) fanout(ctx context.Context, targets []model.Target, emit model.
 			go func(sc model.Scanner, t model.Target) {
 				defer wg.Done()
 				defer func() { <-sem }()
+				// Rate-limit gate per host (anti-DoS). A gate error skips the probe.
+				if e.gate != nil {
+					host := t.Host
+					if host == "" {
+						host = t.Domain
+					}
+					if err := e.gate(ctx, host); err != nil {
+						mu.Lock()
+						errs = append(errs, sc.Name()+": gate: "+err.Error())
+						mu.Unlock()
+						return
+					}
+				}
 				if err := sc.Scan(ctx, t, emit); err != nil {
 					mu.Lock()
 					errs = append(errs, sc.Name()+": "+err.Error())

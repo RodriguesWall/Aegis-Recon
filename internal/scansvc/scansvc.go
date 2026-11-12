@@ -80,7 +80,9 @@ func (s *Service) Run(ctx context.Context, scanID string) (err error) {
 	}
 
 	domain := asset.Name
-	eng := engine.New(s.scanners)
+	// Per-host rate limit (anti-DoS): at most one probe per host every 200ms.
+	limiter := scope.NewRateLimiter(200 * time.Millisecond)
+	eng := engine.New(s.scanners, engine.WithHostGate(limiter.Wait))
 	sc := scope.New(domain)
 	result := eng.RunPipeline(ctx, domain, s.discoverers, sc.Filter)
 

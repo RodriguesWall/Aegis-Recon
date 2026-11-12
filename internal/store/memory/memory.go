@@ -132,11 +132,19 @@ func (s *Store) ListScans(_ context.Context, assetID string) ([]model.Scan, erro
 }
 
 func (s *Store) ListPendingScans(_ context.Context) ([]model.Scan, error) {
+	return s.listByStatus(model.StatusPending)
+}
+
+func (s *Store) ListProcessingScans(_ context.Context) ([]model.Scan, error) {
+	return s.listByStatus(model.StatusProcessing)
+}
+
+func (s *Store) listByStatus(status model.ScanStatus) ([]model.Scan, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var out []model.Scan
 	for _, sc := range s.scans {
-		if sc.Status == model.StatusPending {
+		if sc.Status == status {
 			out = append(out, sc)
 		}
 	}
