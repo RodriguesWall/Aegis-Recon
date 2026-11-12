@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { useParams } from "react-router-dom"
+import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../api/client"
 import { SeverityBadge, severityRank } from "../components/SeverityBadge"
 import { StatusPill } from "../components/StatusPill"
@@ -9,6 +9,7 @@ const POLL_MS = 2000
 
 export function ScanDetail() {
   const { id = "" } = useParams()
+  const navigate = useNavigate()
   const [data, setData] = useState<ScanResult | null>(null)
   const [error, setError] = useState("")
 
@@ -59,14 +60,36 @@ export function ScanDetail() {
     return c
   }, [findings])
 
-  if (error) return <p className="text-sev-critical">{error}</p>
-  if (!data) return <p className="text-muted">Carregando…</p>
+  const back = (
+    <button
+      onClick={() => navigate(-1)}
+      className="text-sm text-muted hover:text-white"
+    >
+      ← Voltar
+    </button>
+  )
+
+  if (error)
+    return (
+      <div className="space-y-4">
+        {back}
+        <p className="text-sev-critical">{error}</p>
+      </div>
+    )
+  if (!data)
+    return (
+      <div className="space-y-4">
+        {back}
+        <p className="text-muted">Carregando…</p>
+      </div>
+    )
 
   const { scan } = data
   const running = scan.status === "PENDING" || scan.status === "PROCESSING"
 
   return (
     <div className="space-y-6">
+      {back}
       <div>
         <h1 className="text-3xl">
           <span className="gradient-text">Scan</span>

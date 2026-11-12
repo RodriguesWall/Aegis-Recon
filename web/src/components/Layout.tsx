@@ -2,7 +2,7 @@ import { Link, Outlet } from "react-router-dom"
 
 export function Layout() {
   return (
-    <div className="min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <nav
         className="sticky top-0 z-50 flex items-center justify-between px-6 py-4"
         style={{
@@ -20,6 +20,13 @@ export function Layout() {
       <main className="mx-auto max-w-5xl px-4 py-8">
         <Outlet />
       </main>
+      <footer
+        className="mt-auto px-6 py-6 text-center text-xs text-muted"
+        style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}
+      >
+        © {new Date().getFullYear()} Aegis-Recon · open-source attack surface scanner ·
+        authorized use only
+      </footer>
     </div>
   )
 }
