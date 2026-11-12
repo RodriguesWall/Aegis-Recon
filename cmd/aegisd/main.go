@@ -16,6 +16,7 @@ import (
 
 	"github.com/RodriguesWall/aegis-recon/internal/api"
 	"github.com/RodriguesWall/aegis-recon/internal/model"
+	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/queue"
 	"github.com/RodriguesWall/aegis-recon/internal/scansvc"
 	"github.com/RodriguesWall/aegis-recon/internal/store/sqlite"
@@ -52,7 +53,8 @@ func main() {
 	}
 
 	// Scan service + queue (workers run the scan lifecycle).
-	svc := scansvc.New(st, logger)
+	tracker := progress.New()
+	svc := scansvc.New(st, tracker, logger)
 	q := queue.New(svc.Run, queue.WithWorkers(2), queue.WithLogger(logger))
 	q.Start(ctx)
 
@@ -82,7 +84,7 @@ func main() {
 	// HTTP server.
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           api.New(st, q).Routes(),
+		Handler:           api.New(st, q, tracker).Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/RodriguesWall/aegis-recon/internal/api"
+	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/queue"
 	"github.com/RodriguesWall/aegis-recon/internal/store/memory"
 )
@@ -18,7 +19,7 @@ import (
 func newServer() http.Handler {
 	st := memory.New()
 	q := queue.New(func(context.Context, string) error { return nil })
-	return api.New(st, q).Routes()
+	return api.New(st, q, progress.New()).Routes()
 }
 
 func do(t *testing.T, h http.Handler, method, path, body string) *httptest.ResponseRecorder {

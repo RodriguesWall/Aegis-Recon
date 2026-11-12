@@ -12,20 +12,22 @@ import (
 	"time"
 
 	"github.com/RodriguesWall/aegis-recon/internal/model"
+	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/queue"
 	"github.com/RodriguesWall/aegis-recon/internal/store"
 	"github.com/google/uuid"
 )
 
-// Server wires the store and queue into HTTP handlers.
+// Server wires the store, queue and progress tracker into HTTP handlers.
 type Server struct {
-	store store.Store
-	queue *queue.Queue
+	store    store.Store
+	queue    *queue.Queue
+	progress *progress.Tracker
 }
 
 // New builds the API server.
-func New(st store.Store, q *queue.Queue) *Server {
-	return &Server{store: st, queue: q}
+func New(st store.Store, q *queue.Queue, tracker *progress.Tracker) *Server {
+	return &Server{store: st, queue: q, progress: tracker}
 }
 
 // Routes returns the HTTP handler with all routes and CORS applied.
@@ -43,6 +45,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/assets/{id}/scans", s.createScan)
 	mux.HandleFunc("GET /api/assets/{id}/scans", s.listScans)
 	mux.HandleFunc("GET /api/scans/{id}", s.getScan)
+	mux.HandleFunc("GET /api/scans/{id}/progress", s.getProgress)
 	mux.HandleFunc("DELETE /api/scans/{id}", s.deleteScan)
 	return cors(mux)
 }
@@ -267,6 +270,16 @@ func (s *Server) getScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"scan": scan, "findings": findings})
+}
+
+func (s *Server) getProgress(w http.ResponseWriter, r *http.Request) {
+	snap, ok := s.progress.Get(r.PathValue("id"))
+	if !ok {
+		// No live progress (scan not started yet or already evicted).
+		writeJSON(w, http.StatusOK, map[string]any{"phase": "", "done": 0, "total": 0, "log": []string{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, snap)
 }
 
 func (s *Server) deleteScan(w http.ResponseWriter, r *http.Request) {

@@ -48,3 +48,11 @@ export interface ScanResult {
   scan: Scan
   findings: Finding[] | null
 }
+
+export interface Progress {
+  phase: string // discovery | probing | done | ""
+  done: number
+  total: number
+  log: string[]
+  updated_at?: string
+}
