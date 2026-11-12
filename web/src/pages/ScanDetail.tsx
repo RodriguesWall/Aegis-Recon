@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState } from "react"
-import { useParams } from "react-router-dom"
+import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../api/client"
 import { SeverityBadge, severityRank } from "../components/SeverityBadge"
-import type { Finding, ScanResult } from "../types"
+import { StatusPill } from "../components/StatusPill"
+import type { Finding, Progress, ScanResult } from "../types"
 
-const POLL_MS = 2000
+const POLL_MS = 1500
 
 export function ScanDetail() {
   const { id = "" } = useParams()
+  const navigate = useNavigate()
   const [data, setData] = useState<ScanResult | null>(null)
+  const [progress, setProgress] = useState<Progress | null>(null)
   const [error, setError] = useState("")
 
   useEffect(() => {
@@ -22,7 +25,15 @@ export function ScanDetail() {
         setData(res)
         const st = res.scan.status
         if (st === "PENDING" || st === "PROCESSING") {
+          try {
+            const p = await api.getProgress(id)
+            if (active) setProgress(p)
+          } catch {
+            /* progress is best-effort */
+          }
           timer = setTimeout(tick, POLL_MS)
+        } else {
+          setProgress(null)
         }
       } catch (e) {
         if (active) setError(String(e))
@@ -58,23 +69,74 @@ export function ScanDetail() {
     return c
   }, [findings])
 
-  if (error) return <p className="text-sev-critical">{error}</p>
-  if (!data) return <p className="text-muted">Carregando…</p>
+  const back = (
+    <button
+      onClick={() => navigate(-1)}
+      className="text-sm text-muted hover:text-white"
+    >
+      ← Voltar
+    </button>
+  )
+
+  if (error)
+    return (
+      <div className="space-y-4">
+        {back}
+        <p className="text-sev-critical">{error}</p>
+      </div>
+    )
+  if (!data)
+    return (
+      <div className="space-y-4">
+        {back}
+        <p className="text-muted">Carregando…</p>
+      </div>
+    )
 
   const { scan } = data
   const running = scan.status === "PENDING" || scan.status === "PROCESSING"
 
   return (
     <div className="space-y-6">
+      {back}
       <div>
         <h1 className="text-3xl">
           <span className="gradient-text">Scan</span>
         </h1>
-        <p className="text-muted">
-          Status: <span className="text-white">{scan.status}</span>
-          {running && <span className="ml-2 animate-pulse">●</span>}
+        <p className="flex items-center gap-2 text-muted">
+          Status: <StatusPill status={scan.status} />
+          {running && <span className="animate-pulse">●</span>}
         </p>
       </div>
+
+      {running && progress && (
+        <div className="glass-card">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted">Fase: {phaseLabel(progress.phase)}</span>
+            {progress.total > 0 && (
+              <span className="text-muted">
+                {progress.done}/{progress.total}
+              </span>
+            )}
+          </div>
+          <div className="mt-2 h-2 w-full overflow-hidden rounded bg-white/10">
+            <div
+              className={progress.total > 0 ? "" : "animate-pulse"}
+              style={{
+                height: "100%",
+                width: progress.total > 0 ? `${Math.round((progress.done / progress.total) * 100)}%` : "25%",
+                background: "linear-gradient(90deg,#8b5cf6,#06b6d4)",
+                transition: "width .3s ease",
+              }}
+            />
+          </div>
+          {progress.log && progress.log.length > 0 && (
+            <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs text-muted">
+              {progress.log.join("\n")}
+            </pre>
+          )}
+        </div>
+      )}
 
       <div className="glass-card flex flex-wrap gap-4">
         {(["critical", "high", "medium", "low", "info"] as const).map((sev) => (
@@ -87,10 +149,16 @@ export function ScanDetail() {
       </div>
 
       {scan.error && (
-        <div className="glass-card">
-          <p className="mb-1 text-sm font-semibold text-muted">Erros do scan</p>
-          <p className="break-words text-xs text-muted">{scan.error}</p>
-        </div>
+        <details className="glass-card">
+          <summary className="cursor-pointer text-sm font-semibold text-muted">
+            Avisos dos módulos ({scan.error.split(";").length})
+          </summary>
+          <p className="mt-1 text-xs text-muted">
+            Erros não-fatais ao sondar alguns hosts (ex: serviço ausente na porta).
+            Não impedem o scan.
+          </p>
+          <p className="mt-2 break-words text-xs text-muted">{scan.error}</p>
+        </details>
       )}
 
       {groups.map((g) => (
@@ -121,6 +189,19 @@ export function ScanDetail() {
       )}
     </div>
   )
+}
+
+function phaseLabel(phase: string): string {
+  switch (phase) {
+    case "discovery":
+      return "Descoberta"
+    case "probing":
+      return "Sondagem"
+    case "done":
+      return "Concluído"
+    default:
+      return "Iniciando"
+  }
 }
 
 function shortEvidence(ev: Record<string, unknown>): string {

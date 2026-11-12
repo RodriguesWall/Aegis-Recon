@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS scans (
 	asset_id     TEXT NOT NULL REFERENCES assets(id),
 	type         TEXT NOT NULL,
 	status       TEXT NOT NULL,
+	include_info INTEGER NOT NULL DEFAULT 0,
 	created_at   TIMESTAMP NOT NULL,
 	started_at   TIMESTAMP,
 	completed_at TIMESTAMP,
@@ -98,7 +99,18 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
+	// Best-effort add for databases created before include_info existed. A
+	// duplicate-column error is expected and ignored.
+	_, _ = s.db.ExecContext(ctx,
+		`ALTER TABLE scans ADD COLUMN include_info INTEGER NOT NULL DEFAULT 0`)
 	return nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func (s *Store) CreateProject(ctx context.Context, p *model.Project) error {
@@ -147,6 +159,66 @@ func (s *Store) CreateAsset(ctx context.Context, a *model.Asset) error {
 	return err
 }
 
+func (s *Store) UpdateProject(ctx context.Context, p *model.Project) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE projects SET name = ? WHERE id = ?`, p.Name, p.ID)
+	return err
+}
+
+// DeleteProject removes the project and all its assets, scans and findings in a
+// single transaction (children first, respecting foreign keys).
+func (s *Store) DeleteProject(ctx context.Context, id string) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmts := []struct {
+		q    string
+		args []any
+	}{
+		{`DELETE FROM findings WHERE scan_id IN (
+			SELECT s.id FROM scans s JOIN assets a ON s.asset_id = a.id WHERE a.project_id = ?)`, []any{id}},
+		{`DELETE FROM scans WHERE asset_id IN (SELECT id FROM assets WHERE project_id = ?)`, []any{id}},
+		{`DELETE FROM assets WHERE project_id = ?`, []any{id}},
+		{`DELETE FROM projects WHERE id = ?`, []any{id}},
+	}
+	for _, st := range stmts {
+		if _, err := tx.ExecContext(ctx, st.q, st.args...); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// DeleteAsset removes the asset and its scans and findings in one transaction.
+func (s *Store) DeleteAsset(ctx context.Context, id string) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmts := []string{
+		`DELETE FROM findings WHERE scan_id IN (SELECT id FROM scans WHERE asset_id = ?)`,
+		`DELETE FROM scans WHERE asset_id = ?`,
+		`DELETE FROM assets WHERE id = ?`,
+	}
+	for _, q := range stmts {
+		if _, err := tx.ExecContext(ctx, q, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *Store) GetAsset(ctx context.Context, id string) (*model.Asset, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, project_id, type, name, scope, created_at FROM assets WHERE id = ?`, id)
@@ -159,6 +231,15 @@ func (s *Store) GetAsset(ctx context.Context, id string) (*model.Asset, error) {
 		a.Scope = strings.Split(scope, ",")
 	}
 	return &a, nil
+}
+
+func (s *Store) UpdateAsset(ctx context.Context, a *model.Asset) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE assets SET name = ?, type = ?, scope = ? WHERE id = ?`,
+		a.Name, a.Type, strings.Join(a.Scope, ","), a.ID)
+	return err
 }
 
 func (s *Store) ListAssets(ctx context.Context, projectID string) ([]model.Asset, error) {
@@ -188,9 +269,9 @@ func (s *Store) CreateScan(ctx context.Context, sc *model.Scan) error {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO scans (id, asset_id, type, status, created_at, started_at, completed_at, error)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		sc.ID, sc.AssetID, sc.Type, sc.Status, sc.CreatedAt, sc.StartedAt, sc.CompletedAt, sc.Error)
+		`INSERT INTO scans (id, asset_id, type, status, include_info, created_at, started_at, completed_at, error)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sc.ID, sc.AssetID, sc.Type, sc.Status, boolToInt(sc.IncludeInfo), sc.CreatedAt, sc.StartedAt, sc.CompletedAt, sc.Error)
 	return err
 }
 
@@ -205,17 +286,19 @@ func (s *Store) UpdateScan(ctx context.Context, sc *model.Scan) error {
 
 func (s *Store) GetScan(ctx context.Context, id string) (*model.Scan, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, asset_id, type, status, created_at, started_at, completed_at, error FROM scans WHERE id = ?`, id)
+		`SELECT id, asset_id, type, status, include_info, created_at, started_at, completed_at, error FROM scans WHERE id = ?`, id)
 	var sc model.Scan
-	if err := row.Scan(&sc.ID, &sc.AssetID, &sc.Type, &sc.Status, &sc.CreatedAt, &sc.StartedAt, &sc.CompletedAt, &sc.Error); err != nil {
+	var includeInfo int
+	if err := row.Scan(&sc.ID, &sc.AssetID, &sc.Type, &sc.Status, &includeInfo, &sc.CreatedAt, &sc.StartedAt, &sc.CompletedAt, &sc.Error); err != nil {
 		return nil, err
 	}
+	sc.IncludeInfo = includeInfo != 0
 	return &sc, nil
 }
 
 func (s *Store) ListScans(ctx context.Context, assetID string) ([]model.Scan, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, asset_id, type, status, created_at, started_at, completed_at, error
+		`SELECT id, asset_id, type, status, include_info, created_at, started_at, completed_at, error
 		 FROM scans WHERE asset_id = ? ORDER BY created_at DESC`, assetID)
 	if err != nil {
 		return nil, err
@@ -225,9 +308,17 @@ func (s *Store) ListScans(ctx context.Context, assetID string) ([]model.Scan, er
 }
 
 func (s *Store) ListPendingScans(ctx context.Context) ([]model.Scan, error) {
+	return s.listByStatus(ctx, model.StatusPending)
+}
+
+func (s *Store) ListProcessingScans(ctx context.Context) ([]model.Scan, error) {
+	return s.listByStatus(ctx, model.StatusProcessing)
+}
+
+func (s *Store) listByStatus(ctx context.Context, status model.ScanStatus) ([]model.Scan, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, asset_id, type, status, created_at, started_at, completed_at, error
-		 FROM scans WHERE status = ? ORDER BY created_at`, model.StatusPending)
+		`SELECT id, asset_id, type, status, include_info, created_at, started_at, completed_at, error
+		 FROM scans WHERE status = ? ORDER BY created_at`, status)
 	if err != nil {
 		return nil, err
 	}
@@ -240,12 +331,32 @@ func scanRows(rows *sql.Rows) ([]model.Scan, error) {
 	var out []model.Scan
 	for rows.Next() {
 		var sc model.Scan
-		if err := rows.Scan(&sc.ID, &sc.AssetID, &sc.Type, &sc.Status, &sc.CreatedAt, &sc.StartedAt, &sc.CompletedAt, &sc.Error); err != nil {
+		var includeInfo int
+		if err := rows.Scan(&sc.ID, &sc.AssetID, &sc.Type, &sc.Status, &includeInfo, &sc.CreatedAt, &sc.StartedAt, &sc.CompletedAt, &sc.Error); err != nil {
 			return nil, err
 		}
+		sc.IncludeInfo = includeInfo != 0
 		out = append(out, sc)
 	}
 	return out, rows.Err()
+}
+
+// DeleteScan removes the scan and its findings in one transaction.
+func (s *Store) DeleteScan(ctx context.Context, id string) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM findings WHERE scan_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM scans WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) SaveFindings(ctx context.Context, scanID string, fs []model.Finding) error {

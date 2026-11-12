@@ -5,16 +5,43 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/RodriguesWall/aegis-recon/internal/model"
 )
 
+// HostGate is called before each probe with the target host. It can block
+// (rate limit) or return an error to skip that probe. scope.RateLimiter.Wait
+// satisfies it. Kept as a func so the engine stays decoupled from the scope
+// package.
+type HostGate func(ctx context.Context, host string) error
+
+// Reachable reports whether a host currently resolves. The pipeline uses it to
+// drop dead discovery results (e.g. historical crt.sh subdomains) before the
+// probe phase, so scanners are not run against non-resolving hosts.
+type Reachable func(ctx context.Context, host string) bool
+
+// ProgressEvent is a coarse progress update emitted during a run.
+type ProgressEvent struct {
+	Phase string // "discovery" | "probing"
+	Done  int    // probes completed (probing phase)
+	Total int    // total probes (probing phase)
+	Msg   string // human-readable line for the live log
+}
+
+// ProgressFunc receives progress events. It may be called concurrently.
+type ProgressFunc func(ProgressEvent)
+
 // Engine runs a set of scanners against a set of targets.
 type Engine struct {
 	scanners    []model.Scanner
 	concurrency int
+	gate        HostGate
+	reachable   Reachable
+	progress    ProgressFunc
 }
 
 // Option configures an Engine.
@@ -28,6 +55,29 @@ func WithConcurrency(n int) Option {
 			n = 1
 		}
 		e.concurrency = n
+	}
+}
+
+// WithHostGate installs a gate called before every probe (e.g. a per-host rate
+// limiter). A gate error skips that probe and is recorded.
+func WithHostGate(g HostGate) Option {
+	return func(e *Engine) { e.gate = g }
+}
+
+// WithReachable installs a reachability check. In RunPipeline, discovered hosts
+// that do not resolve are dropped before probing.
+func WithReachable(r Reachable) Option {
+	return func(e *Engine) { e.reachable = r }
+}
+
+// WithProgress installs a progress callback for live updates.
+func WithProgress(p ProgressFunc) Option {
+	return func(e *Engine) { e.progress = p }
+}
+
+func (e *Engine) emitProgress(ev ProgressEvent) {
+	if e.progress != nil {
+		e.progress(ev)
 	}
 }
 
@@ -93,6 +143,7 @@ func (e *Engine) RunPipeline(ctx context.Context, domain string, discoverers []m
 	}
 
 	// Phase 1: discovery (sequential; usually a single discoverer).
+	e.emitProgress(ProgressEvent{Phase: "discovery", Msg: "descobrindo subdomínios"})
 	hostSet := map[string]bool{domain: true}
 	for _, d := range discoverers {
 		hosts, err := d.Discover(ctx, domain)
@@ -112,6 +163,29 @@ func (e *Engine) RunPipeline(ctx context.Context, domain string, discoverers []m
 	if filter != nil {
 		hosts = filter(hosts)
 	}
+
+	// Drop hosts that do not resolve (dead crt.sh entries), so the probe phase
+	// is not run against them (avoids a flood of "no such host" errors).
+	if e.reachable != nil {
+		e.emitProgress(ProgressEvent{Phase: "discovery", Msg: "verificando resolução DNS dos hosts"})
+		live, skipped := e.keepReachable(ctx, hosts)
+		hosts = live
+		if skipped > 0 {
+			emit(model.Finding{
+				Scanner:  "discovery",
+				Target:   model.Target{Domain: domain},
+				Severity: model.SeverityInfo,
+				Title:    "skipped non-resolving hosts",
+				Evidence: map[string]any{"count": skipped},
+			})
+		}
+	}
+	e.emitProgress(ProgressEvent{
+		Phase: "probing",
+		Done:  0,
+		Total: len(e.scanners) * len(hosts),
+		Msg:   fmt.Sprintf("%d hosts no escopo · %d scanners", len(hosts), len(e.scanners)),
+	})
 
 	// Record each in-scope host and build the probe targets.
 	targets := make([]model.Target, 0, len(hosts))
@@ -143,6 +217,38 @@ func (e *Engine) RunPipeline(ctx context.Context, domain string, discoverers []m
 	}
 }
 
+// keepReachable concurrently checks each host and returns the resolving ones
+// (sorted) plus the count dropped.
+func (e *Engine) keepReachable(ctx context.Context, hosts []string) (live []string, skipped int) {
+	type result struct {
+		host string
+		ok   bool
+	}
+	results := make([]result, len(hosts))
+
+	sem := make(chan struct{}, e.concurrency)
+	var wg sync.WaitGroup
+	for i, h := range hosts {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, h string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results[i] = result{host: h, ok: e.reachable(ctx, h)}
+		}(i, h)
+	}
+	wg.Wait()
+
+	for _, r := range results {
+		if r.ok {
+			live = append(live, r.host)
+		} else {
+			skipped++
+		}
+	}
+	return live, skipped
+}
+
 // fanout runs every scanner against every target with bounded concurrency,
 // emitting findings through emit. It returns the collected scanner errors.
 // Shared by Run (single-phase) and RunPipeline (phase 2).
@@ -150,7 +256,9 @@ func (e *Engine) fanout(ctx context.Context, targets []model.Target, emit model.
 	var (
 		mu   sync.Mutex
 		errs []string
+		done atomic.Int64
 	)
+	total := len(e.scanners) * len(targets)
 	sem := make(chan struct{}, e.concurrency)
 	var wg sync.WaitGroup
 
@@ -161,11 +269,31 @@ func (e *Engine) fanout(ctx context.Context, targets []model.Target, emit model.
 			go func(sc model.Scanner, t model.Target) {
 				defer wg.Done()
 				defer func() { <-sem }()
+				host := t.Host
+				if host == "" {
+					host = t.Domain
+				}
+				// Rate-limit gate per host (anti-DoS). A gate error skips the probe.
+				if e.gate != nil {
+					if err := e.gate(ctx, host); err != nil {
+						mu.Lock()
+						errs = append(errs, sc.Name()+": gate: "+err.Error())
+						mu.Unlock()
+						e.emitProgress(ProgressEvent{Phase: "probing", Done: int(done.Add(1)), Total: total})
+						return
+					}
+				}
 				if err := sc.Scan(ctx, t, emit); err != nil {
 					mu.Lock()
 					errs = append(errs, sc.Name()+": "+err.Error())
 					mu.Unlock()
 				}
+				e.emitProgress(ProgressEvent{
+					Phase: "probing",
+					Done:  int(done.Add(1)),
+					Total: total,
+					Msg:   sc.Name() + " · " + host,
+				})
 			}(sc, t)
 		}
 	}

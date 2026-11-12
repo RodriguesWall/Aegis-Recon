@@ -88,10 +88,13 @@ type Asset struct {
 
 // Scan is one execution against an asset.
 type Scan struct {
-	ID          string     `json:"id"`
-	AssetID     string     `json:"asset_id"`
-	Type        ScanType   `json:"type"`
-	Status      ScanStatus `json:"status"`
+	ID      string     `json:"id"`
+	AssetID string     `json:"asset_id"`
+	Type    ScanType   `json:"type"`
+	Status  ScanStatus `json:"status"`
+	// IncludeInfo keeps info-severity findings in the result. Default false:
+	// scans drop Info (dns/ports/tls inventory noise) unless asked.
+	IncludeInfo bool       `json:"include_info"`
 	CreatedAt   time.Time  `json:"created_at"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`

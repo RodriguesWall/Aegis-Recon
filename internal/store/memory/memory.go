@@ -70,6 +70,47 @@ func (s *Store) CreateAsset(_ context.Context, a *model.Asset) error {
 	return nil
 }
 
+func (s *Store) UpdateProject(_ context.Context, p *model.Project) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.projects[p.ID]; !ok {
+		return ErrNotFound
+	}
+	s.projects[p.ID] = *p
+	return nil
+}
+
+func (s *Store) DeleteProject(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for aid, a := range s.assets {
+		if a.ProjectID == id {
+			s.deleteAssetLocked(aid)
+		}
+	}
+	delete(s.projects, id)
+	return nil
+}
+
+func (s *Store) DeleteAsset(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleteAssetLocked(id)
+	return nil
+}
+
+// deleteAssetLocked removes an asset plus its scans and findings. Caller holds
+// the write lock.
+func (s *Store) deleteAssetLocked(id string) {
+	for sid, sc := range s.scans {
+		if sc.AssetID == id {
+			delete(s.findings, sid)
+			delete(s.scans, sid)
+		}
+	}
+	delete(s.assets, id)
+}
+
 func (s *Store) GetAsset(_ context.Context, id string) (*model.Asset, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -78,6 +119,16 @@ func (s *Store) GetAsset(_ context.Context, id string) (*model.Asset, error) {
 		return nil, ErrNotFound
 	}
 	return &a, nil
+}
+
+func (s *Store) UpdateAsset(_ context.Context, a *model.Asset) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.assets[a.ID]; !ok {
+		return ErrNotFound
+	}
+	s.assets[a.ID] = *a
+	return nil
 }
 
 func (s *Store) ListAssets(_ context.Context, projectID string) ([]model.Asset, error) {
@@ -132,15 +183,31 @@ func (s *Store) ListScans(_ context.Context, assetID string) ([]model.Scan, erro
 }
 
 func (s *Store) ListPendingScans(_ context.Context) ([]model.Scan, error) {
+	return s.listByStatus(model.StatusPending)
+}
+
+func (s *Store) ListProcessingScans(_ context.Context) ([]model.Scan, error) {
+	return s.listByStatus(model.StatusProcessing)
+}
+
+func (s *Store) listByStatus(status model.ScanStatus) ([]model.Scan, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var out []model.Scan
 	for _, sc := range s.scans {
-		if sc.Status == model.StatusPending {
+		if sc.Status == status {
 			out = append(out, sc)
 		}
 	}
 	return out, nil
+}
+
+func (s *Store) DeleteScan(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.findings, id)
+	delete(s.scans, id)
+	return nil
 }
 
 func (s *Store) SaveFindings(_ context.Context, scanID string, fs []model.Finding) error {

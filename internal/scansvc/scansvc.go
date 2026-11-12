@@ -13,6 +13,7 @@ import (
 
 	"github.com/RodriguesWall/aegis-recon/internal/engine"
 	"github.com/RodriguesWall/aegis-recon/internal/model"
+	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/dns"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/fingerprint"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/httpprobe"
@@ -26,6 +27,8 @@ import (
 // Service owns the (stateless) scanners and discoverers and runs scans.
 type Service struct {
 	store       store.Store
+	tracker     *progress.Tracker
+	resolver    *net.Resolver
 	scanners    []model.Scanner
 	discoverers []model.Discoverer
 	logger      *slog.Logger
@@ -33,11 +36,13 @@ type Service struct {
 
 // New builds the service with the F1 surface scanners and the subdomain
 // discoverer. The pure-Go resolver avoids the macOS cgo resolver crash.
-func New(st store.Store, logger *slog.Logger) *Service {
+func New(st store.Store, tracker *progress.Tracker, logger *slog.Logger) *Service {
 	resolver := &net.Resolver{PreferGo: true}
 	dialer := &net.Dialer{}
 	return &Service{
-		store: st,
+		store:    st,
+		tracker:  tracker,
+		resolver: resolver,
 		scanners: []model.Scanner{
 			dns.New(resolver),
 			port.New(dialer),
@@ -48,6 +53,12 @@ func New(st store.Store, logger *slog.Logger) *Service {
 		discoverers: []model.Discoverer{subdomain.New(resolver)},
 		logger:      logger,
 	}
+}
+
+// reachable reports whether a host resolves to at least one address.
+func (s *Service) reachable(ctx context.Context, host string) bool {
+	addrs, err := s.resolver.LookupHost(ctx, host)
+	return err == nil && len(addrs) > 0
 }
 
 // Run executes the scan identified by scanID. It is safe to call from a worker
@@ -80,11 +91,34 @@ func (s *Service) Run(ctx context.Context, scanID string) (err error) {
 	}
 
 	domain := asset.Name
-	eng := engine.New(s.scanners)
+	// Live progress for the dashboard to poll.
+	if s.tracker != nil {
+		s.tracker.Start(scanID)
+	}
+	prog := func(ev engine.ProgressEvent) {
+		if s.tracker == nil {
+			return
+		}
+		s.tracker.SetProgress(scanID, ev.Phase, ev.Done, ev.Total)
+		if ev.Msg != "" {
+			s.tracker.Log(scanID, ev.Msg)
+		}
+	}
+	// Per-host rate limit (anti-DoS): at most one probe per host every 200ms.
+	limiter := scope.NewRateLimiter(200 * time.Millisecond)
+	eng := engine.New(s.scanners,
+		engine.WithHostGate(limiter.Wait),
+		engine.WithReachable(s.reachable),
+		engine.WithProgress(prog),
+	)
 	sc := scope.New(domain)
 	result := eng.RunPipeline(ctx, domain, s.discoverers, sc.Filter)
 
-	if e := s.store.SaveFindings(ctx, scanID, result.Findings); e != nil {
+	findings := result.Findings
+	if !scan.IncludeInfo {
+		findings = dropInfo(findings)
+	}
+	if e := s.store.SaveFindings(ctx, scanID, findings); e != nil {
 		s.fail(ctx, scan, fmt.Errorf("save findings: %w", e))
 		return e
 	}
@@ -99,12 +133,26 @@ func (s *Service) Run(ctx context.Context, scanID string) (err error) {
 	if e := s.store.UpdateScan(ctx, scan); e != nil {
 		return fmt.Errorf("scansvc: mark completed: %w", e)
 	}
+	if s.tracker != nil {
+		s.tracker.Done(scanID)
+	}
 
 	if s.logger != nil {
 		s.logger.Info("scan completed", "scan", scanID, "domain", domain,
 			"findings", len(result.Findings), "errors", len(result.Meta.Errors))
 	}
 	return nil
+}
+
+// dropInfo returns only findings above info severity.
+func dropInfo(fs []model.Finding) []model.Finding {
+	out := make([]model.Finding, 0, len(fs))
+	for _, f := range fs {
+		if f.Severity != model.SeverityInfo {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // fail transitions the scan to FAILED with the error message. Best effort.
@@ -115,5 +163,8 @@ func (s *Service) fail(ctx context.Context, scan *model.Scan, cause error) {
 	scan.Error = cause.Error()
 	if e := s.store.UpdateScan(ctx, scan); e != nil && s.logger != nil {
 		s.logger.Error("mark failed", "scan", scan.ID, "err", e)
+	}
+	if s.tracker != nil {
+		s.tracker.Done(scan.ID)
 	}
 }
