@@ -160,29 +160,29 @@ function AssetCard({
           </p>
           <div className="space-y-2">
             {scans.map((s) => (
-              <Link
+              <div
                 key={s.id}
-                to={`/scans/${s.id}`}
-                className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm transition-colors hover:border-primary/40 hover:bg-white/10"
+                className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm transition-colors hover:border-primary/40 hover:bg-white/10"
               >
-                <span className="flex items-center gap-2">
-                  <StatusPill status={s.status} />
-                  <span className="text-muted">{new Date(s.created_at).toLocaleString()}</span>
-                </span>
-                <span className="flex items-center gap-3">
+                <Link to={`/scans/${s.id}`} className="flex flex-1 items-center justify-between gap-2">
+                  <span className="flex items-center gap-2">
+                    <StatusPill status={s.status} />
+                    <span className="text-muted">
+                      {new Date(s.created_at).toLocaleString()}
+                    </span>
+                  </span>
                   <span className="text-primary">ver report →</span>
-                  <button
-                    className="text-xs text-muted hover:text-sev-critical"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      setScanToDelete(s.id)
-                    }}
-                  >
-                    excluir
-                  </button>
-                </span>
-              </Link>
+                </Link>
+                <CardMenu
+                  items={[
+                    {
+                      label: "Excluir",
+                      danger: true,
+                      onClick: () => setScanToDelete(s.id),
+                    },
+                  ]}
+                />
+              </div>
             ))}
           </div>
         </div>
