@@ -55,4 +55,14 @@ export const api = {
   // browser saves the file.
   exportScanURL: (scanID: string, format: "json" | "sarif") =>
     `${BASE}/scans/${scanID}/export?format=${format}`,
+
+  // Health/version. /health is at the root (not under /api); best-effort.
+  getHealth: async (): Promise<{ version?: string }> => {
+    try {
+      const res = await fetch("/health")
+      return res.ok ? ((await res.json()) as { version?: string }) : {}
+    } catch {
+      return {}
+    }
+  },
 }

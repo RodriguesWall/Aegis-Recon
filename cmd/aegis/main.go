@@ -20,9 +20,14 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/subdomain"
 	tlsscan "github.com/RodriguesWall/aegis-recon/internal/scanner/tls"
 	"github.com/RodriguesWall/aegis-recon/internal/scope"
+	"github.com/RodriguesWall/aegis-recon/internal/version"
 )
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "-version" || os.Args[1] == "--version") {
+		fmt.Println("aegis", version.Version)
+		return
+	}
 	if len(os.Args) < 3 || os.Args[1] != "scan" {
 		fmt.Fprintln(os.Stderr, "usage: aegis scan <domain>")
 		os.Exit(2)

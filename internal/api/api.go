@@ -16,6 +16,7 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/queue"
 	"github.com/RodriguesWall/aegis-recon/internal/report"
 	"github.com/RodriguesWall/aegis-recon/internal/store"
+	"github.com/RodriguesWall/aegis-recon/internal/version"
 	"github.com/google/uuid"
 )
 
@@ -58,6 +59,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service": "aegis-recon",
 		"status":  "ok",
+		"version": version.Version,
 		"queue":   s.queue.Stats(),
 		"time":    time.Now().UTC(),
 	})
