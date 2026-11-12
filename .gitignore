@@ -46,3 +46,6 @@ docs/
 # Front (web/)
 web/node_modules/
 web/dist/
+
+# SQLite em pasta dedicada
+db/

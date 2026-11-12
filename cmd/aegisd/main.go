@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -24,7 +25,15 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
 	addr := envOr("AEGIS_ADDR", "127.0.0.1:8080")
-	dbPath := envOr("AEGIS_DB", "aegis.db")
+	dbPath := envOr("AEGIS_DB", filepath.Join("db", "aegis.db"))
+
+	// Keep the SQLite files in their own directory instead of the project root.
+	if dir := filepath.Dir(dbPath); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			logger.Error("create db dir", "dir", dir, "err", err)
+			os.Exit(1)
+		}
+	}
 
 	// Root context cancelled on SIGINT/SIGTERM for graceful shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
