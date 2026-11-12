@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { api } from "../api/client"
-import { EditableName } from "../components/EditableName"
+import { CardMenu } from "../components/CardMenu"
+import { ConfirmDialog } from "../components/ConfirmDialog"
 import type { Project } from "../types"
 
 export function Projects() {
@@ -62,24 +64,84 @@ export function Projects() {
 
       <div className="grid gap-4 sm:grid-cols-2">
         {projects.map((p) => (
-          <div key={p.id} className="glass-card">
-            <EditableName
-              value={p.name}
-              to={`/projects/${p.id}`}
-              onSave={async (name) => {
-                await api.updateProject(p.id, name)
-                void load()
-              }}
-            />
-            <p className="mt-1 text-xs text-muted">
-              {new Date(p.created_at).toLocaleString()}
-            </p>
-          </div>
+          <ProjectCard key={p.id} project={p} onChanged={load} />
         ))}
       </div>
 
       {!loading && projects.length === 0 && (
         <p className="text-muted">Nenhum projeto ainda.</p>
+      )}
+    </div>
+  )
+}
+
+function ProjectCard({ project, onChanged }: { project: Project; onChanged: () => void }) {
+  const navigate = useNavigate()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(project.name)
+  const [confirm, setConfirm] = useState(false)
+
+  async function save() {
+    const n = draft.trim()
+    if (!n || n === project.name) {
+      setEditing(false)
+      return
+    }
+    await api.updateProject(project.id, n)
+    setEditing(false)
+    onChanged()
+  }
+
+  return (
+    <div
+      className="glass-card cursor-pointer"
+      onClick={() => !editing && navigate(`/projects/${project.id}`)}
+    >
+      <div className="flex items-start justify-between gap-2">
+        {editing ? (
+          <div className="flex flex-1 gap-2" onClick={(e) => e.stopPropagation()}>
+            <input
+              className="input"
+              value={draft}
+              autoFocus
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void save()
+                if (e.key === "Escape") {
+                  setDraft(project.name)
+                  setEditing(false)
+                }
+              }}
+            />
+            <button className="btn-primary" onClick={() => void save()}>
+              Salvar
+            </button>
+          </div>
+        ) : (
+          <h3 className="text-lg">{project.name}</h3>
+        )}
+        <CardMenu
+          items={[
+            { label: "Editar", onClick: () => setEditing(true) },
+            { label: "Excluir", danger: true, onClick: () => setConfirm(true) },
+          ]}
+        />
+      </div>
+      <p className="mt-1 text-xs text-muted">
+        {new Date(project.created_at).toLocaleString()}
+      </p>
+
+      {confirm && (
+        <ConfirmDialog
+          title="Excluir projeto"
+          message={`Excluir "${project.name}" e todos os seus serviços, scans e findings? Esta ação não pode ser desfeita.`}
+          onCancel={() => setConfirm(false)}
+          onConfirm={async () => {
+            await api.deleteProject(project.id)
+            setConfirm(false)
+            onChanged()
+          }}
+        />
       )}
     </div>
   )

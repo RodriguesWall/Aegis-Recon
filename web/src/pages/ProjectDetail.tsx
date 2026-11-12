@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { api } from "../api/client"
-import { EditableName } from "../components/EditableName"
+import { CardMenu } from "../components/CardMenu"
+import { ConfirmDialog } from "../components/ConfirmDialog"
 import { StatusPill } from "../components/StatusPill"
 import type { Asset, Scan } from "../types"
 
 export function ProjectDetail() {
   const { id = "" } = useParams()
-  const navigate = useNavigate()
   const [assets, setAssets] = useState<Asset[]>([])
   const [scansByAsset, setScansByAsset] = useState<Record<string, Scan[]>>({})
   const [name, setName] = useState("")
@@ -45,15 +45,6 @@ export function ProjectDetail() {
     }
   }
 
-  async function runScan(assetID: string) {
-    try {
-      const scan = await api.createScan(assetID)
-      navigate(`/scans/${scan.id}`)
-    } catch (err) {
-      setError(String(err))
-    }
-  }
-
   return (
     <div className="space-y-6">
       <Link to="/" className="text-sm text-muted hover:text-white">
@@ -83,51 +74,119 @@ export function ProjectDetail() {
 
       <div className="space-y-4">
         {assets.map((a) => (
-          <div key={a.id} className="glass-card">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <EditableName
-                  value={a.name}
-                  onSave={async (name) => {
-                    await api.updateAsset(a.id, name)
-                    void load()
-                  }}
-                />
-                <p className="text-xs text-muted">{a.type}</p>
-              </div>
-              <button className="btn-accent" onClick={() => runScan(a.id)}>
-                Rodar scan
-              </button>
-            </div>
-            {(scansByAsset[a.id]?.length ?? 0) > 0 && (
-              <div className="mt-4 border-t border-white/10 pt-3">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-                  Scans anteriores — clique para ver o report
-                </p>
-                <div className="space-y-2">
-                  {scansByAsset[a.id].map((s) => (
-                    <Link
-                      key={s.id}
-                      to={`/scans/${s.id}`}
-                      className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm transition-colors hover:border-primary/40 hover:bg-white/10"
-                    >
-                      <span className="flex items-center gap-2">
-                        <StatusPill status={s.status} />
-                        <span className="text-muted">
-                          {new Date(s.created_at).toLocaleString()}
-                        </span>
-                      </span>
-                      <span className="text-primary">ver report →</span>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          <AssetCard key={a.id} asset={a} scans={scansByAsset[a.id] ?? []} onChanged={load} />
         ))}
       </div>
 
       {assets.length === 0 && <p className="text-muted">Nenhum serviço ainda.</p>}
+    </div>
+  )
+}
+
+function AssetCard({
+  asset,
+  scans,
+  onChanged,
+}: {
+  asset: Asset
+  scans: Scan[]
+  onChanged: () => void
+}) {
+  const navigate = useNavigate()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(asset.name)
+  const [confirm, setConfirm] = useState(false)
+
+  async function save() {
+    const n = draft.trim()
+    if (!n || n === asset.name) {
+      setEditing(false)
+      return
+    }
+    await api.updateAsset(asset.id, n)
+    setEditing(false)
+    onChanged()
+  }
+
+  async function runScan() {
+    const scan = await api.createScan(asset.id)
+    navigate(`/scans/${scan.id}`)
+  }
+
+  return (
+    <div className="glass-card">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex-1">
+          {editing ? (
+            <div className="flex gap-2">
+              <input
+                className="input"
+                value={draft}
+                autoFocus
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void save()
+                  if (e.key === "Escape") {
+                    setDraft(asset.name)
+                    setEditing(false)
+                  }
+                }}
+              />
+              <button className="btn-primary" onClick={() => void save()}>
+                Salvar
+              </button>
+            </div>
+          ) : (
+            <h3 className="text-lg">{asset.name}</h3>
+          )}
+          <p className="text-xs text-muted">{asset.type}</p>
+        </div>
+        <button className="btn-accent" onClick={() => void runScan()}>
+          Rodar scan
+        </button>
+        <CardMenu
+          items={[
+            { label: "Editar", onClick: () => setEditing(true) },
+            { label: "Excluir", danger: true, onClick: () => setConfirm(true) },
+          ]}
+        />
+      </div>
+
+      {scans.length > 0 && (
+        <div className="mt-4 border-t border-white/10 pt-3">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+            Scans anteriores — clique para ver o report
+          </p>
+          <div className="space-y-2">
+            {scans.map((s) => (
+              <Link
+                key={s.id}
+                to={`/scans/${s.id}`}
+                className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm transition-colors hover:border-primary/40 hover:bg-white/10"
+              >
+                <span className="flex items-center gap-2">
+                  <StatusPill status={s.status} />
+                  <span className="text-muted">{new Date(s.created_at).toLocaleString()}</span>
+                </span>
+                <span className="text-primary">ver report →</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {confirm && (
+        <ConfirmDialog
+          title="Excluir serviço"
+          message={`Excluir "${asset.name}" e todos os seus scans e findings? Esta ação não pode ser desfeita.`}
+          onCancel={() => setConfirm(false)}
+          onConfirm={async () => {
+            await api.deleteAsset(asset.id)
+            setConfirm(false)
+            onChanged()
+          }}
+        />
+      )}
     </div>
   )
 }

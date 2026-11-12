@@ -80,6 +80,37 @@ func (s *Store) UpdateProject(_ context.Context, p *model.Project) error {
 	return nil
 }
 
+func (s *Store) DeleteProject(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for aid, a := range s.assets {
+		if a.ProjectID == id {
+			s.deleteAssetLocked(aid)
+		}
+	}
+	delete(s.projects, id)
+	return nil
+}
+
+func (s *Store) DeleteAsset(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleteAssetLocked(id)
+	return nil
+}
+
+// deleteAssetLocked removes an asset plus its scans and findings. Caller holds
+// the write lock.
+func (s *Store) deleteAssetLocked(id string) {
+	for sid, sc := range s.scans {
+		if sc.AssetID == id {
+			delete(s.findings, sid)
+			delete(s.scans, sid)
+		}
+	}
+	delete(s.assets, id)
+}
+
 func (s *Store) GetAsset(_ context.Context, id string) (*model.Asset, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

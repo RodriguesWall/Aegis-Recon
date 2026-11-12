@@ -121,6 +121,41 @@ func TestUpdateProjectAndAsset(t *testing.T) {
 	}
 }
 
+func TestDeleteProjectAndAsset(t *testing.T) {
+	h := newServer()
+	pid := idOf(t, do(t, h, "POST", "/api/projects", `{"name":"p"}`))
+	aid := idOf(t, do(t, h, "POST", "/api/projects/"+pid+"/assets", `{"name":"a.com"}`))
+
+	// delete asset -> 204, list empty
+	if w := do(t, h, "DELETE", "/api/assets/"+aid, ""); w.Code != http.StatusNoContent {
+		t.Fatalf("delete asset: %d", w.Code)
+	}
+	w := do(t, h, "GET", "/api/projects/"+pid+"/assets", "")
+	var as []map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &as)
+	if len(as) != 0 {
+		t.Fatalf("asset not deleted: %s", w.Body)
+	}
+
+	// delete project -> 204, list empty
+	if w := do(t, h, "DELETE", "/api/projects/"+pid, ""); w.Code != http.StatusNoContent {
+		t.Fatalf("delete project: %d", w.Code)
+	}
+	w = do(t, h, "GET", "/api/projects", "")
+	var ps []map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &ps)
+	if len(ps) != 0 {
+		t.Fatalf("project not deleted: %s", w.Body)
+	}
+}
+
+func TestDeleteMissing(t *testing.T) {
+	h := newServer()
+	if w := do(t, h, "DELETE", "/api/projects/nope", ""); w.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d", w.Code)
+	}
+}
+
 func TestUpdateMissingProject(t *testing.T) {
 	h := newServer()
 	w := do(t, h, "PATCH", "/api/projects/nope", `{"name":"x"}`)

@@ -35,9 +35,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/projects", s.createProject)
 	mux.HandleFunc("GET /api/projects", s.listProjects)
 	mux.HandleFunc("PATCH /api/projects/{id}", s.updateProject)
+	mux.HandleFunc("DELETE /api/projects/{id}", s.deleteProject)
 	mux.HandleFunc("POST /api/projects/{id}/assets", s.createAsset)
 	mux.HandleFunc("GET /api/projects/{id}/assets", s.listAssets)
 	mux.HandleFunc("PATCH /api/assets/{id}", s.updateAsset)
+	mux.HandleFunc("DELETE /api/assets/{id}", s.deleteAsset)
 	mux.HandleFunc("POST /api/assets/{id}/scans", s.createScan)
 	mux.HandleFunc("GET /api/assets/{id}/scans", s.listScans)
 	mux.HandleFunc("GET /api/scans/{id}", s.getScan)
@@ -105,6 +107,19 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
+}
+
+func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := s.store.GetProject(r.Context(), id); err != nil {
+		writeErr(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if err := s.store.DeleteProject(r.Context(), id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) createAsset(w http.ResponseWriter, r *http.Request) {
@@ -187,6 +202,19 @@ func (s *Server) updateAsset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a)
 }
 
+func (s *Server) deleteAsset(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := s.store.GetAsset(r.Context(), id); err != nil {
+		writeErr(w, http.StatusNotFound, "asset not found")
+		return
+	}
+	if err := s.store.DeleteAsset(r.Context(), id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 	assetID := r.PathValue("id")
 	if _, err := s.store.GetAsset(r.Context(), assetID); err != nil {
@@ -259,7 +287,7 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

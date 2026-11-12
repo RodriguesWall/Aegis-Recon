@@ -29,6 +29,7 @@ export const api = {
     req<Project>("/projects", { method: "POST", body: JSON.stringify({ name }) }),
   updateProject: (id: string, name: string) =>
     req<Project>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
+  deleteProject: (id: string) => req<void>(`/projects/${id}`, { method: "DELETE" }),
 
   listAssets: (projectID: string) => req<Asset[]>(`/projects/${projectID}/assets`),
   createAsset: (projectID: string, name: string, type = "domain") =>
@@ -38,6 +39,7 @@ export const api = {
     }),
   updateAsset: (id: string, name: string) =>
     req<Asset>(`/assets/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
+  deleteAsset: (id: string) => req<void>(`/assets/${id}`, { method: "DELETE" }),
 
   listScans: (assetID: string) => req<Scan[]>(`/assets/${assetID}/scans`),
   createScan: (assetID: string) =>

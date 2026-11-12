@@ -55,6 +55,40 @@ func TestSQLite_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestSQLite_DeleteProjectCascade(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	_ = st.CreateProject(ctx, &model.Project{ID: "pr", Name: "x", CreatedAt: time.Now()})
+	_ = st.CreateAsset(ctx, &model.Asset{ID: "a", ProjectID: "pr", Type: model.AssetDomain, Name: "x.com", CreatedAt: time.Now()})
+	_ = st.CreateScan(ctx, &model.Scan{ID: "s", AssetID: "a", Type: model.ScanSurface, Status: model.StatusCompleted, CreatedAt: time.Now()})
+	_ = st.SaveFindings(ctx, "s", []model.Finding{{Scanner: "dns", Severity: model.SeverityInfo, Title: "t"}})
+
+	if err := st.DeleteProject(ctx, "pr"); err != nil {
+		t.Fatalf("delete project: %v", err)
+	}
+
+	if ps, _ := st.ListProjects(ctx); len(ps) != 0 {
+		t.Errorf("projects not deleted: %+v", ps)
+	}
+	if as, _ := st.ListAssets(ctx, "pr"); len(as) != 0 {
+		t.Errorf("assets not deleted: %+v", as)
+	}
+	if fs, _ := st.ListFindings(ctx, "s"); len(fs) != 0 {
+		t.Errorf("findings not deleted: %+v", fs)
+	}
+	if _, err := st.GetScan(ctx, "s"); err == nil {
+		t.Errorf("scan not deleted")
+	}
+}
+
 func TestSQLite_ListByStatus(t *testing.T) {
 	ctx := context.Background()
 	st, err := sqlite.Open(":memory:")

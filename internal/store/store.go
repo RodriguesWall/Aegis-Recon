@@ -19,11 +19,16 @@ type Store interface {
 	GetProject(ctx context.Context, id string) (*model.Project, error)
 	ListProjects(ctx context.Context) ([]model.Project, error)
 	UpdateProject(ctx context.Context, p *model.Project) error
+	// DeleteProject removes the project and everything under it (assets, scans,
+	// findings).
+	DeleteProject(ctx context.Context, id string) error
 
 	CreateAsset(ctx context.Context, a *model.Asset) error
 	GetAsset(ctx context.Context, id string) (*model.Asset, error)
 	ListAssets(ctx context.Context, projectID string) ([]model.Asset, error)
 	UpdateAsset(ctx context.Context, a *model.Asset) error
+	// DeleteAsset removes the asset and its scans and findings.
+	DeleteAsset(ctx context.Context, id string) error
 
 	CreateScan(ctx context.Context, s *model.Scan) error
 	UpdateScan(ctx context.Context, s *model.Scan) error

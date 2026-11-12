@@ -155,6 +155,58 @@ func (s *Store) UpdateProject(ctx context.Context, p *model.Project) error {
 	return err
 }
 
+// DeleteProject removes the project and all its assets, scans and findings in a
+// single transaction (children first, respecting foreign keys).
+func (s *Store) DeleteProject(ctx context.Context, id string) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmts := []struct {
+		q    string
+		args []any
+	}{
+		{`DELETE FROM findings WHERE scan_id IN (
+			SELECT s.id FROM scans s JOIN assets a ON s.asset_id = a.id WHERE a.project_id = ?)`, []any{id}},
+		{`DELETE FROM scans WHERE asset_id IN (SELECT id FROM assets WHERE project_id = ?)`, []any{id}},
+		{`DELETE FROM assets WHERE project_id = ?`, []any{id}},
+		{`DELETE FROM projects WHERE id = ?`, []any{id}},
+	}
+	for _, st := range stmts {
+		if _, err := tx.ExecContext(ctx, st.q, st.args...); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// DeleteAsset removes the asset and its scans and findings in one transaction.
+func (s *Store) DeleteAsset(ctx context.Context, id string) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmts := []string{
+		`DELETE FROM findings WHERE scan_id IN (SELECT id FROM scans WHERE asset_id = ?)`,
+		`DELETE FROM scans WHERE asset_id = ?`,
+		`DELETE FROM assets WHERE id = ?`,
+	}
+	for _, q := range stmts {
+		if _, err := tx.ExecContext(ctx, q, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *Store) GetAsset(ctx context.Context, id string) (*model.Asset, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, project_id, type, name, scope, created_at FROM assets WHERE id = ?`, id)
