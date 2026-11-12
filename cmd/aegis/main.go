@@ -40,6 +40,11 @@ func main() {
 	}
 	// Same safety rules as the API: per-host rate limit (anti-DoS).
 	limiter := scope.NewRateLimiter(200 * time.Millisecond)
+	// Only probe hosts that resolve (drop dead crt.sh entries).
+	reachable := func(ctx context.Context, host string) bool {
+		addrs, err := resolver.LookupHost(ctx, host)
+		return err == nil && len(addrs) > 0
+	}
 	// Phase 2 scanners.
 	eng := engine.New([]model.Scanner{
 		dns.New(resolver),
@@ -47,7 +52,7 @@ func main() {
 		tlsscan.New(),
 		httpprobe.New(),
 		fingerprint.New(),
-	}, engine.WithHostGate(limiter.Wait))
+	}, engine.WithHostGate(limiter.Wait), engine.WithReachable(reachable))
 	// Safety gate: only probe hosts within the domain's scope.
 	sc := scope.New(domain)
 

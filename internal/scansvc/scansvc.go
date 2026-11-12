@@ -26,6 +26,7 @@ import (
 // Service owns the (stateless) scanners and discoverers and runs scans.
 type Service struct {
 	store       store.Store
+	resolver    *net.Resolver
 	scanners    []model.Scanner
 	discoverers []model.Discoverer
 	logger      *slog.Logger
@@ -37,7 +38,8 @@ func New(st store.Store, logger *slog.Logger) *Service {
 	resolver := &net.Resolver{PreferGo: true}
 	dialer := &net.Dialer{}
 	return &Service{
-		store: st,
+		store:    st,
+		resolver: resolver,
 		scanners: []model.Scanner{
 			dns.New(resolver),
 			port.New(dialer),
@@ -48,6 +50,12 @@ func New(st store.Store, logger *slog.Logger) *Service {
 		discoverers: []model.Discoverer{subdomain.New(resolver)},
 		logger:      logger,
 	}
+}
+
+// reachable reports whether a host resolves to at least one address.
+func (s *Service) reachable(ctx context.Context, host string) bool {
+	addrs, err := s.resolver.LookupHost(ctx, host)
+	return err == nil && len(addrs) > 0
 }
 
 // Run executes the scan identified by scanID. It is safe to call from a worker
@@ -82,7 +90,10 @@ func (s *Service) Run(ctx context.Context, scanID string) (err error) {
 	domain := asset.Name
 	// Per-host rate limit (anti-DoS): at most one probe per host every 200ms.
 	limiter := scope.NewRateLimiter(200 * time.Millisecond)
-	eng := engine.New(s.scanners, engine.WithHostGate(limiter.Wait))
+	eng := engine.New(s.scanners,
+		engine.WithHostGate(limiter.Wait),
+		engine.WithReachable(s.reachable),
+	)
 	sc := scope.New(domain)
 	result := eng.RunPipeline(ctx, domain, s.discoverers, sc.Filter)
 

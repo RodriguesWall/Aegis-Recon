@@ -87,10 +87,16 @@ export function ScanDetail() {
       </div>
 
       {scan.error && (
-        <div className="glass-card">
-          <p className="mb-1 text-sm font-semibold text-muted">Erros do scan</p>
-          <p className="break-words text-xs text-muted">{scan.error}</p>
-        </div>
+        <details className="glass-card">
+          <summary className="cursor-pointer text-sm font-semibold text-muted">
+            Avisos dos módulos ({scan.error.split(";").length})
+          </summary>
+          <p className="mt-1 text-xs text-muted">
+            Erros não-fatais ao sondar alguns hosts (ex: serviço ausente na porta).
+            Não impedem o scan.
+          </p>
+          <p className="mt-2 break-words text-xs text-muted">{scan.error}</p>
+        </details>
       )}
 
       {groups.map((g) => (

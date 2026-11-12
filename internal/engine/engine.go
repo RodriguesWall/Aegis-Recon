@@ -17,11 +17,17 @@ import (
 // package.
 type HostGate func(ctx context.Context, host string) error
 
+// Reachable reports whether a host currently resolves. The pipeline uses it to
+// drop dead discovery results (e.g. historical crt.sh subdomains) before the
+// probe phase, so scanners are not run against non-resolving hosts.
+type Reachable func(ctx context.Context, host string) bool
+
 // Engine runs a set of scanners against a set of targets.
 type Engine struct {
 	scanners    []model.Scanner
 	concurrency int
 	gate        HostGate
+	reachable   Reachable
 }
 
 // Option configures an Engine.
@@ -42,6 +48,12 @@ func WithConcurrency(n int) Option {
 // limiter). A gate error skips that probe and is recorded.
 func WithHostGate(g HostGate) Option {
 	return func(e *Engine) { e.gate = g }
+}
+
+// WithReachable installs a reachability check. In RunPipeline, discovered hosts
+// that do not resolve are dropped before probing.
+func WithReachable(r Reachable) Option {
+	return func(e *Engine) { e.reachable = r }
 }
 
 // New builds an Engine from the given scanners.
@@ -126,6 +138,22 @@ func (e *Engine) RunPipeline(ctx context.Context, domain string, discoverers []m
 		hosts = filter(hosts)
 	}
 
+	// Drop hosts that do not resolve (dead crt.sh entries), so the probe phase
+	// is not run against them (avoids a flood of "no such host" errors).
+	if e.reachable != nil {
+		live, skipped := e.keepReachable(ctx, hosts)
+		hosts = live
+		if skipped > 0 {
+			emit(model.Finding{
+				Scanner:  "discovery",
+				Target:   model.Target{Domain: domain},
+				Severity: model.SeverityInfo,
+				Title:    "skipped non-resolving hosts",
+				Evidence: map[string]any{"count": skipped},
+			})
+		}
+	}
+
 	// Record each in-scope host and build the probe targets.
 	targets := make([]model.Target, 0, len(hosts))
 	for _, h := range hosts {
@@ -154,6 +182,38 @@ func (e *Engine) RunPipeline(ctx context.Context, domain string, discoverers []m
 			Errors:    errs,
 		},
 	}
+}
+
+// keepReachable concurrently checks each host and returns the resolving ones
+// (sorted) plus the count dropped.
+func (e *Engine) keepReachable(ctx context.Context, hosts []string) (live []string, skipped int) {
+	type result struct {
+		host string
+		ok   bool
+	}
+	results := make([]result, len(hosts))
+
+	sem := make(chan struct{}, e.concurrency)
+	var wg sync.WaitGroup
+	for i, h := range hosts {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, h string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results[i] = result{host: h, ok: e.reachable(ctx, h)}
+		}(i, h)
+	}
+	wg.Wait()
+
+	for _, r := range results {
+		if r.ok {
+			live = append(live, r.host)
+		} else {
+			skipped++
+		}
+	}
+	return live, skipped
 }
 
 // fanout runs every scanner against every target with bounded concurrency,

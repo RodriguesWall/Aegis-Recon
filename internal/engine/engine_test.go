@@ -84,6 +84,45 @@ func TestRun_HostGateSkipsBlockedHost(t *testing.T) {
 	}
 }
 
+type fakeDiscoverer struct{ hosts []string }
+
+func (f fakeDiscoverer) Name() string { return "fake" }
+func (f fakeDiscoverer) Discover(context.Context, string) ([]string, error) {
+	return f.hosts, nil
+}
+
+func TestRunPipeline_DropsNonResolvingHosts(t *testing.T) {
+	eng := engine.New([]model.Scanner{fakeScanner{name: "a", n: 1}},
+		engine.WithReachable(func(_ context.Context, host string) bool {
+			return host != "dead.com"
+		}))
+
+	res := eng.RunPipeline(context.Background(), "example.com",
+		[]model.Discoverer{fakeDiscoverer{hosts: []string{"live.com", "dead.com"}}},
+		nil)
+
+	// example.com (root) + live.com are reachable and probed; dead.com dropped.
+	probed := 0
+	skipped := false
+	for _, f := range res.Findings {
+		if f.Title == "x" {
+			probed++
+		}
+		if f.Title == "skipped non-resolving hosts" {
+			skipped = true
+		}
+		if f.Target.Host == "dead.com" {
+			t.Errorf("dead.com should not be probed: %+v", f)
+		}
+	}
+	if probed != 2 {
+		t.Fatalf("probed findings = %d, want 2 (example.com + live.com)", probed)
+	}
+	if !skipped {
+		t.Error("expected a 'skipped non-resolving hosts' finding")
+	}
+}
+
 func TestRun_NoopScanner(t *testing.T) {
 	eng := engine.New([]model.Scanner{noop.New()})
 	res := eng.Run(context.Background(), "example.com", []model.Target{{Domain: "example.com", Host: "example.com"}})
