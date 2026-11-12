@@ -50,4 +50,9 @@ export const api = {
   getScan: (scanID: string) => req<ScanResult>(`/scans/${scanID}`),
   getProgress: (scanID: string) => req<Progress>(`/scans/${scanID}/progress`),
   deleteScan: (scanID: string) => req<void>(`/scans/${scanID}`, { method: "DELETE" }),
+
+  // Download URL for a scan export; the server sets Content-Disposition so the
+  // browser saves the file.
+  exportScanURL: (scanID: string, format: "json" | "sarif") =>
+    `${BASE}/scans/${scanID}/export?format=${format}`,
 }
