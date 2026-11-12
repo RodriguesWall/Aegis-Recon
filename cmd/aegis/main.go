@@ -29,6 +29,10 @@ func main() {
 	}
 	domain := os.Args[2]
 
+	// Authorized-use notice (safety rule, see docs/RISKS.md #4). Printed to
+	// stderr so it never pollutes the JSON result on stdout.
+	fmt.Fprintln(os.Stderr, "aegis: authorized use only — scan systems you own or are explicitly permitted to test.")
+
 	// PreferGo uses the pure-Go resolver instead of the system cgo resolver,
 	// which can crash on macOS under many concurrent lookups.
 	resolver := &net.Resolver{PreferGo: true}
