@@ -222,12 +222,20 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "asset not found")
 		return
 	}
+	// Options are optional; default (no body) means exclude Info findings.
+	var in struct {
+		IncludeInfo bool `json:"include_info"`
+	}
+	if r.ContentLength != 0 && r.Body != nil {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in)
+	}
 	scan := &model.Scan{
-		ID:        uuid.NewString(),
-		AssetID:   assetID,
-		Type:      model.ScanSurface,
-		Status:    model.StatusPending,
-		CreatedAt: time.Now().UTC(),
+		ID:          uuid.NewString(),
+		AssetID:     assetID,
+		Type:        model.ScanSurface,
+		Status:      model.StatusPending,
+		IncludeInfo: in.IncludeInfo,
+		CreatedAt:   time.Now().UTC(),
 	}
 	if err := s.store.CreateScan(r.Context(), scan); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())

@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS scans (
 	asset_id     TEXT NOT NULL REFERENCES assets(id),
 	type         TEXT NOT NULL,
 	status       TEXT NOT NULL,
+	include_info INTEGER NOT NULL DEFAULT 0,
 	created_at   TIMESTAMP NOT NULL,
 	started_at   TIMESTAMP,
 	completed_at TIMESTAMP,
@@ -98,7 +99,18 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
+	// Best-effort add for databases created before include_info existed. A
+	// duplicate-column error is expected and ignored.
+	_, _ = s.db.ExecContext(ctx,
+		`ALTER TABLE scans ADD COLUMN include_info INTEGER NOT NULL DEFAULT 0`)
 	return nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func (s *Store) CreateProject(ctx context.Context, p *model.Project) error {
@@ -257,9 +269,9 @@ func (s *Store) CreateScan(ctx context.Context, sc *model.Scan) error {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO scans (id, asset_id, type, status, created_at, started_at, completed_at, error)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		sc.ID, sc.AssetID, sc.Type, sc.Status, sc.CreatedAt, sc.StartedAt, sc.CompletedAt, sc.Error)
+		`INSERT INTO scans (id, asset_id, type, status, include_info, created_at, started_at, completed_at, error)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sc.ID, sc.AssetID, sc.Type, sc.Status, boolToInt(sc.IncludeInfo), sc.CreatedAt, sc.StartedAt, sc.CompletedAt, sc.Error)
 	return err
 }
 
@@ -274,17 +286,19 @@ func (s *Store) UpdateScan(ctx context.Context, sc *model.Scan) error {
 
 func (s *Store) GetScan(ctx context.Context, id string) (*model.Scan, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, asset_id, type, status, created_at, started_at, completed_at, error FROM scans WHERE id = ?`, id)
+		`SELECT id, asset_id, type, status, include_info, created_at, started_at, completed_at, error FROM scans WHERE id = ?`, id)
 	var sc model.Scan
-	if err := row.Scan(&sc.ID, &sc.AssetID, &sc.Type, &sc.Status, &sc.CreatedAt, &sc.StartedAt, &sc.CompletedAt, &sc.Error); err != nil {
+	var includeInfo int
+	if err := row.Scan(&sc.ID, &sc.AssetID, &sc.Type, &sc.Status, &includeInfo, &sc.CreatedAt, &sc.StartedAt, &sc.CompletedAt, &sc.Error); err != nil {
 		return nil, err
 	}
+	sc.IncludeInfo = includeInfo != 0
 	return &sc, nil
 }
 
 func (s *Store) ListScans(ctx context.Context, assetID string) ([]model.Scan, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, asset_id, type, status, created_at, started_at, completed_at, error
+		`SELECT id, asset_id, type, status, include_info, created_at, started_at, completed_at, error
 		 FROM scans WHERE asset_id = ? ORDER BY created_at DESC`, assetID)
 	if err != nil {
 		return nil, err
@@ -303,7 +317,7 @@ func (s *Store) ListProcessingScans(ctx context.Context) ([]model.Scan, error) {
 
 func (s *Store) listByStatus(ctx context.Context, status model.ScanStatus) ([]model.Scan, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, asset_id, type, status, created_at, started_at, completed_at, error
+		`SELECT id, asset_id, type, status, include_info, created_at, started_at, completed_at, error
 		 FROM scans WHERE status = ? ORDER BY created_at`, status)
 	if err != nil {
 		return nil, err
@@ -317,9 +331,11 @@ func scanRows(rows *sql.Rows) ([]model.Scan, error) {
 	var out []model.Scan
 	for rows.Next() {
 		var sc model.Scan
-		if err := rows.Scan(&sc.ID, &sc.AssetID, &sc.Type, &sc.Status, &sc.CreatedAt, &sc.StartedAt, &sc.CompletedAt, &sc.Error); err != nil {
+		var includeInfo int
+		if err := rows.Scan(&sc.ID, &sc.AssetID, &sc.Type, &sc.Status, &includeInfo, &sc.CreatedAt, &sc.StartedAt, &sc.CompletedAt, &sc.Error); err != nil {
 			return nil, err
 		}
+		sc.IncludeInfo = includeInfo != 0
 		out = append(out, sc)
 	}
 	return out, rows.Err()

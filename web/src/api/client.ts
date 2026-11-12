@@ -42,8 +42,11 @@ export const api = {
   deleteAsset: (id: string) => req<void>(`/assets/${id}`, { method: "DELETE" }),
 
   listScans: (assetID: string) => req<Scan[]>(`/assets/${assetID}/scans`),
-  createScan: (assetID: string) =>
-    req<Scan>(`/assets/${assetID}/scans`, { method: "POST" }),
+  createScan: (assetID: string, includeInfo = false) =>
+    req<Scan>(`/assets/${assetID}/scans`, {
+      method: "POST",
+      body: JSON.stringify({ include_info: includeInfo }),
+    }),
   getScan: (scanID: string) => req<ScanResult>(`/scans/${scanID}`),
   deleteScan: (scanID: string) => req<void>(`/scans/${scanID}`, { method: "DELETE" }),
 }

@@ -97,7 +97,11 @@ func (s *Service) Run(ctx context.Context, scanID string) (err error) {
 	sc := scope.New(domain)
 	result := eng.RunPipeline(ctx, domain, s.discoverers, sc.Filter)
 
-	if e := s.store.SaveFindings(ctx, scanID, result.Findings); e != nil {
+	findings := result.Findings
+	if !scan.IncludeInfo {
+		findings = dropInfo(findings)
+	}
+	if e := s.store.SaveFindings(ctx, scanID, findings); e != nil {
 		s.fail(ctx, scan, fmt.Errorf("save findings: %w", e))
 		return e
 	}
@@ -118,6 +122,17 @@ func (s *Service) Run(ctx context.Context, scanID string) (err error) {
 			"findings", len(result.Findings), "errors", len(result.Meta.Errors))
 	}
 	return nil
+}
+
+// dropInfo returns only findings above info severity.
+func dropInfo(fs []model.Finding) []model.Finding {
+	out := make([]model.Finding, 0, len(fs))
+	for _, f := range fs {
+		if f.Severity != model.SeverityInfo {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // fail transitions the scan to FAILED with the error message. Best effort.

@@ -97,6 +97,7 @@ function AssetCard({
   const [draft, setDraft] = useState(asset.name)
   const [confirm, setConfirm] = useState(false)
   const [scanToDelete, setScanToDelete] = useState<string | null>(null)
+  const [includeInfo, setIncludeInfo] = useState(false)
 
   async function save() {
     const n = draft.trim()
@@ -110,7 +111,7 @@ function AssetCard({
   }
 
   async function runScan() {
-    const scan = await api.createScan(asset.id)
+    const scan = await api.createScan(asset.id, includeInfo)
     navigate(`/scans/${scan.id}`)
   }
 
@@ -152,6 +153,15 @@ function AssetCard({
           ]}
         />
       </div>
+
+      <label className="mt-3 flex items-center gap-2 text-xs text-muted">
+        <input
+          type="checkbox"
+          checked={includeInfo}
+          onChange={(e) => setIncludeInfo(e.target.checked)}
+        />
+        Incluir findings informativos (Info) — inventário dns/portas/tls
+      </label>
 
       {scans.length > 0 && (
         <div className="mt-4 border-t border-white/10 pt-3">
