@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/RodriguesWall/aegis-recon/internal/api"
+	"github.com/RodriguesWall/aegis-recon/internal/model"
 	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/queue"
 	"github.com/RodriguesWall/aegis-recon/internal/store/memory"
@@ -176,6 +178,55 @@ func TestUpdateMissingProject(t *testing.T) {
 	w := do(t, h, "PATCH", "/api/projects/nope", `{"name":"x"}`)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("want 404, got %d", w.Code)
+	}
+}
+
+func TestExportScan(t *testing.T) {
+	st := memory.New()
+	q := queue.New(func(context.Context, string) error { return nil })
+	h := api.New(st, q, progress.New()).Routes()
+	ctx := context.Background()
+
+	// Seed a completed scan with findings directly in the store.
+	_ = st.CreateProject(ctx, &model.Project{ID: "p1", Name: "p"})
+	_ = st.CreateAsset(ctx, &model.Asset{ID: "a1", ProjectID: "p1", Name: "example.com", Type: model.AssetDomain})
+	_ = st.CreateScan(ctx, &model.Scan{ID: "s1", AssetID: "a1", Type: model.ScanSurface, Status: model.StatusCompleted})
+	_ = st.SaveFindings(ctx, "s1", []model.Finding{
+		{Scanner: "port", Target: model.Target{Host: "example.com", Port: 22}, Severity: model.SeverityCritical, Title: "open port: 22/tcp"},
+	})
+
+	// SARIF export.
+	w := do(t, h, "GET", "/api/scans/s1/export?format=sarif", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("sarif export: %d %s", w.Code, w.Body)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/sarif+json" {
+		t.Errorf("sarif content-type = %q", ct)
+	}
+	if cd := w.Header().Get("Content-Disposition"); !strings.Contains(cd, "scan-s1.sarif") {
+		t.Errorf("sarif disposition = %q", cd)
+	}
+	if !strings.Contains(w.Body.String(), `"version": "2.1.0"`) {
+		t.Errorf("sarif body missing version:\n%s", w.Body)
+	}
+
+	// JSON export (default).
+	w = do(t, h, "GET", "/api/scans/s1/export", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("json export: %d %s", w.Code, w.Body)
+	}
+	if cd := w.Header().Get("Content-Disposition"); !strings.Contains(cd, "scan-s1.json") {
+		t.Errorf("json disposition = %q", cd)
+	}
+
+	// Unknown format -> 400.
+	if w := do(t, h, "GET", "/api/scans/s1/export?format=xml", ""); w.Code != http.StatusBadRequest {
+		t.Errorf("unknown format: want 400, got %d", w.Code)
+	}
+
+	// Missing scan -> 404.
+	if w := do(t, h, "GET", "/api/scans/nope/export?format=sarif", ""); w.Code != http.StatusNotFound {
+		t.Errorf("missing scan: want 404, got %d", w.Code)
 	}
 }
 

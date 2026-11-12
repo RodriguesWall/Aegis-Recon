@@ -48,25 +48,25 @@ export function ProjectDetail() {
   return (
     <div className="space-y-6">
       <Link to="/" className="text-sm text-muted hover:text-white">
-        ← Projetos
+        ← Projects
       </Link>
 
       <div>
         <h1 className="text-3xl">
-          <span className="gradient-text">Serviços</span>
+          <span className="gradient-text">Services</span>
         </h1>
-        <p className="text-muted">Cadastre domínios/hosts e dispare scans.</p>
+        <p className="text-muted">Register domains/hosts and trigger scans.</p>
       </div>
 
       <form onSubmit={addAsset} className="glass-card flex gap-3">
         <input
           className="input"
-          placeholder="Domínio do serviço (ex: example.com)"
+          placeholder="Service domain (e.g. example.com)"
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
         <button type="submit" className="btn-primary whitespace-nowrap">
-          Adicionar
+          Add
         </button>
       </form>
 
@@ -78,7 +78,7 @@ export function ProjectDetail() {
         ))}
       </div>
 
-      {assets.length === 0 && <p className="text-muted">Nenhum serviço ainda.</p>}
+      {assets.length === 0 && <p className="text-muted">No services yet.</p>}
     </div>
   )
 }
@@ -135,7 +135,7 @@ function AssetCard({
                 }}
               />
               <button className="btn-primary" onClick={() => void save()}>
-                Salvar
+                Save
               </button>
             </div>
           ) : (
@@ -144,12 +144,12 @@ function AssetCard({
           <p className="text-xs text-muted">{asset.type}</p>
         </div>
         <button className="btn-accent" onClick={() => void runScan()}>
-          Rodar scan
+          Run scan
         </button>
         <CardMenu
           items={[
-            { label: "Editar", onClick: () => setEditing(true) },
-            { label: "Excluir", danger: true, onClick: () => setConfirm(true) },
+            { label: "Edit", onClick: () => setEditing(true) },
+            { label: "Delete", danger: true, onClick: () => setConfirm(true) },
           ]}
         />
       </div>
@@ -160,13 +160,13 @@ function AssetCard({
           checked={includeInfo}
           onChange={(e) => setIncludeInfo(e.target.checked)}
         />
-        Incluir findings informativos (Info) — inventário dns/portas/tls
+        Include informational findings (Info) — dns/ports/tls inventory
       </label>
 
       {scans.length > 0 && (
         <div className="mt-4 border-t border-white/10 pt-3">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-            Scans anteriores — clique para ver o report
+            Previous scans — click to view the report
           </p>
           <div className="space-y-2">
             {scans.map((s) => (
@@ -181,12 +181,12 @@ function AssetCard({
                       {new Date(s.created_at).toLocaleString()}
                     </span>
                   </span>
-                  <span className="text-primary">ver report →</span>
+                  <span className="text-primary">view report →</span>
                 </Link>
                 <CardMenu
                   items={[
                     {
-                      label: "Excluir",
+                      label: "Delete",
                       danger: true,
                       onClick: () => setScanToDelete(s.id),
                     },
@@ -200,8 +200,8 @@ function AssetCard({
 
       {confirm && (
         <ConfirmDialog
-          title="Excluir serviço"
-          message={`Excluir "${asset.name}" e todos os seus scans e findings? Esta ação não pode ser desfeita.`}
+          title="Delete service"
+          message={`Delete "${asset.name}" and all its scans and findings? This action cannot be undone.`}
           onCancel={() => setConfirm(false)}
           onConfirm={async () => {
             await api.deleteAsset(asset.id)
@@ -213,8 +213,8 @@ function AssetCard({
 
       {scanToDelete && (
         <ConfirmDialog
-          title="Excluir scan"
-          message="Excluir este scan e seus findings? Esta ação não pode ser desfeita."
+          title="Delete scan"
+          message="Delete this scan and its findings? This action cannot be undone."
           onCancel={() => setScanToDelete(null)}
           onConfirm={async () => {
             await api.deleteScan(scanToDelete)

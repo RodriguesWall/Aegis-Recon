@@ -6,11 +6,19 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/aegisd ./cmd/aegisd
+# Pre-create the data dir owned by the distroless nonroot UID (65532). A fresh
+# named volume inherits this ownership on first mount, so aegisd (nonroot) can
+# write the SQLite file. Without it: SQLITE_CANTOPEN (error 14).
+RUN mkdir -p /data && chown 65532:65532 /data
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/aegisd /aegisd
+COPY --from=build --chown=65532:65532 /data /data
 EXPOSE 8080
 ENV AEGIS_ADDR=0.0.0.0:8080 \
     AEGIS_DB=/data/aegis.db
 VOLUME /data
+# Self-check via the binary itself (distroless has no shell/curl).
+HEALTHCHECK --interval=10s --timeout=4s --start-period=5s --retries=5 \
+    CMD ["/aegisd", "-health"]
 ENTRYPOINT ["/aegisd"]

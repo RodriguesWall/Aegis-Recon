@@ -14,6 +14,7 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/model"
 	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/queue"
+	"github.com/RodriguesWall/aegis-recon/internal/report"
 	"github.com/RodriguesWall/aegis-recon/internal/store"
 	"github.com/google/uuid"
 )
@@ -46,6 +47,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/assets/{id}/scans", s.listScans)
 	mux.HandleFunc("GET /api/scans/{id}", s.getScan)
 	mux.HandleFunc("GET /api/scans/{id}/progress", s.getProgress)
+	mux.HandleFunc("GET /api/scans/{id}/export", s.exportScan)
 	mux.HandleFunc("DELETE /api/scans/{id}", s.deleteScan)
 	return cors(mux)
 }
@@ -270,6 +272,42 @@ func (s *Server) getScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"scan": scan, "findings": findings})
+}
+
+// exportScan returns the scan's findings as a downloadable file. ?format=sarif
+// yields SARIF 2.1.0; ?format=json (default) yields the native Aegis payload.
+func (s *Server) exportScan(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	scan, err := s.store.GetScan(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "scan not found")
+		return
+	}
+	findings, err := s.store.ListFindings(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	switch r.URL.Query().Get("format") {
+	case "sarif":
+		b, err := report.SARIF(findings)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/sarif+json")
+		w.Header().Set("Content-Disposition", `attachment; filename="scan-`+id+`.sarif"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(b)
+	case "", "json":
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", `attachment; filename="scan-`+id+`.json"`)
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{"scan": scan, "findings": findings})
+	default:
+		writeErr(w, http.StatusBadRequest, "unknown format (use json or sarif)")
+	}
 }
 
 func (s *Server) getProgress(w http.ResponseWriter, r *http.Request) {

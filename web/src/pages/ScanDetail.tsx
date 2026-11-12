@@ -74,7 +74,7 @@ export function ScanDetail() {
       onClick={() => navigate(-1)}
       className="text-sm text-muted hover:text-white"
     >
-      ← Voltar
+      ← Back
     </button>
   )
 
@@ -89,7 +89,7 @@ export function ScanDetail() {
     return (
       <div className="space-y-4">
         {back}
-        <p className="text-muted">Carregando…</p>
+        <p className="text-muted">Loading…</p>
       </div>
     )
 
@@ -99,20 +99,23 @@ export function ScanDetail() {
   return (
     <div className="space-y-6">
       {back}
-      <div>
-        <h1 className="text-3xl">
-          <span className="gradient-text">Scan</span>
-        </h1>
-        <p className="flex items-center gap-2 text-muted">
-          Status: <StatusPill status={scan.status} />
-          {running && <span className="animate-pulse">●</span>}
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-3xl">
+            <span className="gradient-text">Scan</span>
+          </h1>
+          <p className="flex items-center gap-2 text-muted">
+            Status: <StatusPill status={scan.status} />
+            {running && <span className="animate-pulse">●</span>}
+          </p>
+        </div>
+        <DownloadMenu scanID={scan.id} />
       </div>
 
       {running && progress && (
         <div className="glass-card">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-muted">Fase: {phaseLabel(progress.phase)}</span>
+            <span className="text-muted">Phase: {phaseLabel(progress.phase)}</span>
             {progress.total > 0 && (
               <span className="text-muted">
                 {progress.done}/{progress.total}
@@ -151,11 +154,11 @@ export function ScanDetail() {
       {scan.error && (
         <details className="glass-card">
           <summary className="cursor-pointer text-sm font-semibold text-muted">
-            Avisos dos módulos ({scan.error.split(";").length})
+            Module warnings ({scan.error.split(";").length})
           </summary>
           <p className="mt-1 text-xs text-muted">
-            Erros não-fatais ao sondar alguns hosts (ex: serviço ausente na porta).
-            Não impedem o scan.
+            Non-fatal errors while probing some hosts (e.g. no service on the port).
+            They do not stop the scan.
           </p>
           <p className="mt-2 break-words text-xs text-muted">{scan.error}</p>
         </details>
@@ -185,7 +188,47 @@ export function ScanDetail() {
       ))}
 
       {!running && findings.length === 0 && (
-        <p className="text-muted">Nenhum finding.</p>
+        <p className="text-muted">No findings.</p>
+      )}
+    </div>
+  )
+}
+
+function DownloadMenu({ scanID }: { scanID: string }) {
+  const [open, setOpen] = useState(false)
+
+  function download(format: "json" | "sarif") {
+    const a = document.createElement("a")
+    a.href = api.exportScanURL(scanID, format)
+    a.download = `scan-${scanID}.${format === "sarif" ? "sarif" : "json"}`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setOpen(false)
+  }
+
+  return (
+    <div className="relative" onBlur={() => setTimeout(() => setOpen(false), 120)}>
+      <button className="btn-ghost whitespace-nowrap" onClick={() => setOpen((o) => !o)}>
+        Download ▾
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-lg border border-white/10 bg-[#0f0f19] shadow-lg"
+        >
+          <button
+            className="block w-full px-4 py-2 text-left text-sm text-white hover:bg-white/10"
+            onClick={() => download("json")}
+          >
+            JSON (Aegis)
+          </button>
+          <button
+            className="block w-full px-4 py-2 text-left text-sm text-white hover:bg-white/10"
+            onClick={() => download("sarif")}
+          >
+            SARIF
+          </button>
+        </div>
       )}
     </div>
   )
@@ -194,13 +237,13 @@ export function ScanDetail() {
 function phaseLabel(phase: string): string {
   switch (phase) {
     case "discovery":
-      return "Descoberta"
+      return "Discovery"
     case "probing":
-      return "Sondagem"
+      return "Probing"
     case "done":
-      return "Concluído"
+      return "Done"
     default:
-      return "Iniciando"
+      return "Starting"
   }
 }
 

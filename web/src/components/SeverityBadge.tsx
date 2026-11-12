@@ -2,10 +2,10 @@ import type { Severity } from "../types"
 
 // Colors and labels ported from pentest-landing's PremiumReport.
 const style: Record<Severity, { color: string; bg: string; label: string }> = {
-  critical: { color: "#fca5a5", bg: "rgba(239,68,68,.10)", label: "Crítico" },
-  high: { color: "#fdba74", bg: "rgba(249,115,22,.10)", label: "Alto" },
-  medium: { color: "#fde047", bg: "rgba(234,179,8,.10)", label: "Médio" },
-  low: { color: "#93c5fd", bg: "rgba(59,130,246,.10)", label: "Baixo" },
+  critical: { color: "#fca5a5", bg: "rgba(239,68,68,.10)", label: "Critical" },
+  high: { color: "#fdba74", bg: "rgba(249,115,22,.10)", label: "High" },
+  medium: { color: "#fde047", bg: "rgba(234,179,8,.10)", label: "Medium" },
+  low: { color: "#93c5fd", bg: "rgba(59,130,246,.10)", label: "Low" },
   info: { color: "#94a3b8", bg: "rgba(148,163,184,.10)", label: "Info" },
 }
 

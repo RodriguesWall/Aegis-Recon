@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -23,6 +24,12 @@ import (
 )
 
 func main() {
+	// Healthcheck mode: used by the Docker HEALTHCHECK. Runs inside the container
+	// (distroless has no shell/curl), hits /health locally, exits 0 (ok) or 1.
+	if len(os.Args) > 1 && (os.Args[1] == "-health" || os.Args[1] == "--health") {
+		os.Exit(healthcheck(envOr("AEGIS_ADDR", "127.0.0.1:8080")))
+	}
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
 	addr := envOr("AEGIS_ADDR", "127.0.0.1:8080")
@@ -101,6 +108,26 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("aegisd stopped")
+}
+
+// healthcheck performs a local GET /health and returns a process exit code.
+// The port is taken from addr; the host is forced to loopback so it works
+// regardless of the bind address (e.g. 0.0.0.0 in the container).
+func healthcheck(addr string) int {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil || port == "" {
+		port = "8080"
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://127.0.0.1:" + port + "/health")
+	if err != nil {
+		return 1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 1
+	}
+	return 0
 }
 
 func envOr(key, def string) string {

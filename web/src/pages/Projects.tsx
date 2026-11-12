@@ -42,25 +42,25 @@ export function Projects() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl">
-          <span className="gradient-text">Projetos</span>
+          <span className="gradient-text">Projects</span>
         </h1>
-        <p className="text-muted">Cadastre um projeto e seus serviços para escanear.</p>
+        <p className="text-muted">Register a project and its services to scan.</p>
       </div>
 
       <form onSubmit={create} className="glass-card flex gap-3">
         <input
           className="input"
-          placeholder="Nome do projeto (ex: Produto X)"
+          placeholder="Project name (e.g. Product X)"
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
         <button type="submit" className="btn-primary whitespace-nowrap">
-          Criar
+          Create
         </button>
       </form>
 
       {error && <p className="text-sev-critical">{error}</p>}
-      {loading && <p className="text-muted">Carregando…</p>}
+      {loading && <p className="text-muted">Loading…</p>}
 
       <div className="grid gap-4 sm:grid-cols-2">
         {projects.map((p) => (
@@ -69,7 +69,7 @@ export function Projects() {
       </div>
 
       {!loading && projects.length === 0 && (
-        <p className="text-muted">Nenhum projeto ainda.</p>
+        <p className="text-muted">No projects yet.</p>
       )}
     </div>
   )
@@ -114,7 +114,7 @@ function ProjectCard({ project, onChanged }: { project: Project; onChanged: () =
               }}
             />
             <button className="btn-primary" onClick={() => void save()}>
-              Salvar
+              Save
             </button>
           </div>
         ) : (
@@ -122,8 +122,8 @@ function ProjectCard({ project, onChanged }: { project: Project; onChanged: () =
         )}
         <CardMenu
           items={[
-            { label: "Editar", onClick: () => setEditing(true) },
-            { label: "Excluir", danger: true, onClick: () => setConfirm(true) },
+            { label: "Edit", onClick: () => setEditing(true) },
+            { label: "Delete", danger: true, onClick: () => setConfirm(true) },
           ]}
         />
       </div>
@@ -133,8 +133,8 @@ function ProjectCard({ project, onChanged }: { project: Project; onChanged: () =
 
       {confirm && (
         <ConfirmDialog
-          title="Excluir projeto"
-          message={`Excluir "${project.name}" e todos os seus serviços, scans e findings? Esta ação não pode ser desfeita.`}
+          title="Delete project"
+          message={`Delete "${project.name}" and all its services, scans and findings? This action cannot be undone.`}
           onCancel={() => setConfirm(false)}
           onConfirm={async () => {
             await api.deleteProject(project.id)
