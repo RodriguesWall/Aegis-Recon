@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
-import { Link } from "react-router-dom"
 import { api } from "../api/client"
+import { EditableName } from "../components/EditableName"
 import type { Project } from "../types"
 
 export function Projects() {
@@ -62,10 +62,19 @@ export function Projects() {
 
       <div className="grid gap-4 sm:grid-cols-2">
         {projects.map((p) => (
-          <Link key={p.id} to={`/projects/${p.id}`} className="glass-card block">
-            <h3 className="text-lg">{p.name}</h3>
-            <p className="text-xs text-muted">{new Date(p.created_at).toLocaleString()}</p>
-          </Link>
+          <div key={p.id} className="glass-card">
+            <EditableName
+              value={p.name}
+              to={`/projects/${p.id}`}
+              onSave={async (name) => {
+                await api.updateProject(p.id, name)
+                void load()
+              }}
+            />
+            <p className="mt-1 text-xs text-muted">
+              {new Date(p.created_at).toLocaleString()}
+            </p>
+          </div>
         ))}
       </div>
 

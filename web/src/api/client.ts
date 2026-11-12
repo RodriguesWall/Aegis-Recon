@@ -27,6 +27,8 @@ export const api = {
   listProjects: () => req<Project[]>("/projects"),
   createProject: (name: string) =>
     req<Project>("/projects", { method: "POST", body: JSON.stringify({ name }) }),
+  updateProject: (id: string, name: string) =>
+    req<Project>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
 
   listAssets: (projectID: string) => req<Asset[]>(`/projects/${projectID}/assets`),
   createAsset: (projectID: string, name: string, type = "domain") =>
@@ -34,6 +36,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ name, type }),
     }),
+  updateAsset: (id: string, name: string) =>
+    req<Asset>(`/assets/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
 
   listScans: (assetID: string) => req<Scan[]>(`/assets/${assetID}/scans`),
   createScan: (assetID: string) =>

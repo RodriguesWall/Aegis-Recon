@@ -87,6 +87,48 @@ func TestFullFlow(t *testing.T) {
 	}
 }
 
+func TestUpdateProjectAndAsset(t *testing.T) {
+	h := newServer()
+
+	pid := idOf(t, do(t, h, "POST", "/api/projects", `{"name":"old"}`))
+	aid := idOf(t, do(t, h, "POST", "/api/projects/"+pid+"/assets", `{"name":"a.com"}`))
+
+	// rename project
+	w := do(t, h, "PATCH", "/api/projects/"+pid, `{"name":"new name"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("patch project: %d %s", w.Code, w.Body)
+	}
+	// rename asset
+	w = do(t, h, "PATCH", "/api/assets/"+aid, `{"name":"b.com"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("patch asset: %d %s", w.Code, w.Body)
+	}
+
+	// verify project name persisted
+	w = do(t, h, "GET", "/api/projects", "")
+	var ps []map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &ps)
+	if len(ps) != 1 || ps[0]["name"] != "new name" {
+		t.Fatalf("project not renamed: %s", w.Body)
+	}
+
+	// verify asset name persisted
+	w = do(t, h, "GET", "/api/projects/"+pid+"/assets", "")
+	var as []map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &as)
+	if len(as) != 1 || as[0]["name"] != "b.com" {
+		t.Fatalf("asset not renamed: %s", w.Body)
+	}
+}
+
+func TestUpdateMissingProject(t *testing.T) {
+	h := newServer()
+	w := do(t, h, "PATCH", "/api/projects/nope", `{"name":"x"}`)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d", w.Code)
+	}
+}
+
 func TestScanOnMissingAsset(t *testing.T) {
 	h := newServer()
 	w := do(t, h, "POST", "/api/assets/nope/scans", "")

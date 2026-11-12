@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { api } from "../api/client"
+import { EditableName } from "../components/EditableName"
 import type { Asset, Scan } from "../types"
 
 export function ProjectDetail() {
@@ -84,7 +85,13 @@ export function ProjectDetail() {
           <div key={a.id} className="glass-card">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-lg">{a.name}</h3>
+                <EditableName
+                  value={a.name}
+                  onSave={async (name) => {
+                    await api.updateAsset(a.id, name)
+                    void load()
+                  }}
+                />
                 <p className="text-xs text-muted">{a.type}</p>
               </div>
               <button className="btn-accent" onClick={() => runScan(a.id)}>

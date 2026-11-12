@@ -70,6 +70,16 @@ func (s *Store) CreateAsset(_ context.Context, a *model.Asset) error {
 	return nil
 }
 
+func (s *Store) UpdateProject(_ context.Context, p *model.Project) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.projects[p.ID]; !ok {
+		return ErrNotFound
+	}
+	s.projects[p.ID] = *p
+	return nil
+}
+
 func (s *Store) GetAsset(_ context.Context, id string) (*model.Asset, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -78,6 +88,16 @@ func (s *Store) GetAsset(_ context.Context, id string) (*model.Asset, error) {
 		return nil, ErrNotFound
 	}
 	return &a, nil
+}
+
+func (s *Store) UpdateAsset(_ context.Context, a *model.Asset) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.assets[a.ID]; !ok {
+		return ErrNotFound
+	}
+	s.assets[a.ID] = *a
+	return nil
 }
 
 func (s *Store) ListAssets(_ context.Context, projectID string) ([]model.Asset, error) {

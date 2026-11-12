@@ -34,8 +34,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("POST /api/projects", s.createProject)
 	mux.HandleFunc("GET /api/projects", s.listProjects)
+	mux.HandleFunc("PATCH /api/projects/{id}", s.updateProject)
 	mux.HandleFunc("POST /api/projects/{id}/assets", s.createAsset)
 	mux.HandleFunc("GET /api/projects/{id}/assets", s.listAssets)
+	mux.HandleFunc("PATCH /api/assets/{id}", s.updateAsset)
 	mux.HandleFunc("POST /api/assets/{id}/scans", s.createScan)
 	mux.HandleFunc("GET /api/assets/{id}/scans", s.listScans)
 	mux.HandleFunc("GET /api/scans/{id}", s.getScan)
@@ -79,6 +81,30 @@ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, ps)
+}
+
+func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
+	p, err := s.store.GetProject(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "project not found")
+		return
+	}
+	var in struct {
+		Name string `json:"name"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if strings.TrimSpace(in.Name) == "" {
+		writeErr(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	p.Name = in.Name
+	if err := s.store.UpdateProject(r.Context(), p); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
 }
 
 func (s *Server) createAsset(w http.ResponseWriter, r *http.Request) {
@@ -129,6 +155,36 @@ func (s *Server) listAssets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, as)
+}
+
+func (s *Server) updateAsset(w http.ResponseWriter, r *http.Request) {
+	a, err := s.store.GetAsset(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "asset not found")
+		return
+	}
+	var in struct {
+		Name  string   `json:"name"`
+		Type  string   `json:"type"`
+		Scope []string `json:"scope"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if strings.TrimSpace(in.Name) != "" {
+		a.Name = in.Name
+	}
+	if in.Type != "" {
+		a.Type = model.AssetType(in.Type)
+	}
+	if len(in.Scope) > 0 {
+		a.Scope = in.Scope
+	}
+	if err := s.store.UpdateAsset(r.Context(), a); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, a)
 }
 
 func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
@@ -203,7 +259,7 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

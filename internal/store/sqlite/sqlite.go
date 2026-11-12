@@ -147,6 +147,14 @@ func (s *Store) CreateAsset(ctx context.Context, a *model.Asset) error {
 	return err
 }
 
+func (s *Store) UpdateProject(ctx context.Context, p *model.Project) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE projects SET name = ? WHERE id = ?`, p.Name, p.ID)
+	return err
+}
+
 func (s *Store) GetAsset(ctx context.Context, id string) (*model.Asset, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, project_id, type, name, scope, created_at FROM assets WHERE id = ?`, id)
@@ -159,6 +167,15 @@ func (s *Store) GetAsset(ctx context.Context, id string) (*model.Asset, error) {
 		a.Scope = strings.Split(scope, ",")
 	}
 	return &a, nil
+}
+
+func (s *Store) UpdateAsset(ctx context.Context, a *model.Asset) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE assets SET name = ?, type = ?, scope = ? WHERE id = ?`,
+		a.Name, a.Type, strings.Join(a.Scope, ","), a.ID)
+	return err
 }
 
 func (s *Store) ListAssets(ctx context.Context, projectID string) ([]model.Asset, error) {
