@@ -150,57 +150,70 @@ export function ScanDetail() {
         </div>
       )}
 
-      <div className="glass-card flex flex-wrap gap-4">
-        {(["critical", "high", "medium", "low", "info"] as const).map((sev) => (
-          <div key={sev} className="flex items-center gap-2">
-            <SeverityBadge severity={sev} />
-            <span className="text-white">{counts[sev] ?? 0}</span>
-          </div>
-        ))}
-        <div className="ml-auto text-muted">total: {findings.length}</div>
-      </div>
-
-      {!running && diff && <ChangesCard diff={diff} />}
-
-      {scan.error && (
-        <details className="glass-card">
-          <summary className="cursor-pointer text-sm font-semibold text-muted">
-            Module warnings ({scan.error.split(";").length})
-          </summary>
-          <p className="mt-1 text-xs text-muted">
-            Non-fatal errors while probing some hosts (e.g. no service on the port).
-            They do not stop the scan.
-          </p>
-          <p className="mt-2 break-words text-xs text-muted">{scan.error}</p>
-        </details>
-      )}
-
-      {groups.map((g) => (
-        <div key={g.host} className="glass-card">
-          <h3 className="mb-3 text-lg">{g.host}</h3>
-          <div className="space-y-2">
-            {g.items.map((f, i) => (
-              <div
-                key={i}
-                className="flex items-start gap-3 border-t border-white/5 pt-2 first:border-0 first:pt-0"
-              >
-                <SeverityBadge severity={f.severity} />
-                <div className="min-w-0">
-                  <p className="text-white">{f.title}</p>
-                  <p className="text-xs text-muted">
-                    {f.scanner}
-                    {f.evidence ? " · " + shortEvidence(f.evidence) : ""}
-                  </p>
-                </div>
+      <div className="grid gap-6 lg:grid-cols-[1fr_320px] lg:items-start">
+        {/* Right rail: report info (severity summary + changes). Stacks above
+            the findings on narrow screens; sticks alongside them on wide ones. */}
+        <aside className="space-y-4 lg:order-2 lg:sticky lg:top-20">
+          <div className="glass-card flex flex-col gap-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+              Severity
+            </p>
+            {(["critical", "high", "medium", "low", "info"] as const).map((sev) => (
+              <div key={sev} className="flex items-center justify-between gap-2">
+                <SeverityBadge severity={sev} />
+                <span className="text-white">{counts[sev] ?? 0}</span>
               </div>
             ))}
+            <div className="mt-1 border-t border-white/10 pt-2 text-sm text-muted">
+              total: {findings.length}
+            </div>
           </div>
-        </div>
-      ))}
 
-      {!running && findings.length === 0 && (
-        <p className="text-muted">No findings.</p>
-      )}
+          {!running && diff && <ChangesCard diff={diff} />}
+        </aside>
+
+        <div className="min-w-0 space-y-6 lg:order-1">
+          {scan.error && (
+            <details className="glass-card">
+              <summary className="cursor-pointer text-sm font-semibold text-muted">
+                Module warnings ({scan.error.split(";").length})
+              </summary>
+              <p className="mt-1 text-xs text-muted">
+                Non-fatal errors while probing some hosts (e.g. no service on the port).
+                They do not stop the scan.
+              </p>
+              <p className="mt-2 break-words text-xs text-muted">{scan.error}</p>
+            </details>
+          )}
+
+          {groups.map((g) => (
+            <div key={g.host} className="glass-card">
+              <h3 className="mb-3 text-lg">{g.host}</h3>
+              <div className="space-y-2">
+                {g.items.map((f, i) => (
+                  <div
+                    key={i}
+                    className="flex items-start gap-3 border-t border-white/5 pt-2 first:border-0 first:pt-0"
+                  >
+                    <SeverityBadge severity={f.severity} />
+                    <div className="min-w-0">
+                      <p className="text-white">{f.title}</p>
+                      <p className="text-xs text-muted">
+                        {f.scanner}
+                        {f.evidence ? " · " + shortEvidence(f.evidence) : ""}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          {!running && findings.length === 0 && (
+            <p className="text-muted">No findings.</p>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
