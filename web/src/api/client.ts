@@ -1,4 +1,4 @@
-import type { Asset, Progress, Project, Scan, ScanResult } from "../types"
+import type { Asset, Progress, Project, Scan, ScanDiff, ScanResult } from "../types"
 
 // Same-origin: Vite dev proxies /api to the Go API; nginx does so in prod.
 const BASE = "/api"
@@ -49,6 +49,7 @@ export const api = {
     }),
   getScan: (scanID: string) => req<ScanResult>(`/scans/${scanID}`),
   getProgress: (scanID: string) => req<Progress>(`/scans/${scanID}/progress`),
+  getScanDiff: (scanID: string) => req<ScanDiff>(`/scans/${scanID}/diff`),
   deleteScan: (scanID: string) => req<void>(`/scans/${scanID}`, { method: "DELETE" }),
 
   // Download URL for a scan export; the server sets Content-Disposition so the

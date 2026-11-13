@@ -83,9 +83,10 @@ CREATE TABLE IF NOT EXISTS findings (
 	scan_id    TEXT NOT NULL REFERENCES scans(id),
 	scanner    TEXT NOT NULL,
 	severity   TEXT NOT NULL,
-	title      TEXT NOT NULL,
-	target     TEXT NOT NULL,
-	evidence   TEXT NOT NULL DEFAULT '{}'
+	title       TEXT NOT NULL,
+	target      TEXT NOT NULL,
+	evidence    TEXT NOT NULL DEFAULT '{}',
+	fingerprint TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_assets_project ON assets(project_id);
 CREATE INDEX IF NOT EXISTS idx_scans_asset   ON scans(asset_id);
@@ -103,6 +104,12 @@ func (s *Store) Migrate(ctx context.Context) error {
 	// duplicate-column error is expected and ignored.
 	_, _ = s.db.ExecContext(ctx,
 		`ALTER TABLE scans ADD COLUMN include_info INTEGER NOT NULL DEFAULT 0`)
+	// Same best-effort add for the finding fingerprint (scan diffing + triage).
+	// Run before the index so databases predating the column still migrate.
+	_, _ = s.db.ExecContext(ctx,
+		`ALTER TABLE findings ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.ExecContext(ctx,
+		`CREATE INDEX IF NOT EXISTS idx_findings_fp ON findings(fingerprint)`)
 	return nil
 }
 
@@ -368,7 +375,7 @@ func (s *Store) SaveFindings(ctx context.Context, scanID string, fs []model.Find
 	}
 	defer func() { _ = tx.Rollback() }()
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO findings (scan_id, scanner, severity, title, target, evidence) VALUES (?, ?, ?, ?, ?, ?)`)
+		`INSERT INTO findings (scan_id, scanner, severity, title, target, evidence, fingerprint) VALUES (?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
@@ -376,7 +383,7 @@ func (s *Store) SaveFindings(ctx context.Context, scanID string, fs []model.Find
 	for _, f := range fs {
 		target, _ := json.Marshal(f.Target)
 		evidence, _ := json.Marshal(f.Evidence)
-		if _, err := stmt.ExecContext(ctx, scanID, f.Scanner, f.Severity, f.Title, string(target), string(evidence)); err != nil {
+		if _, err := stmt.ExecContext(ctx, scanID, f.Scanner, f.Severity, f.Title, string(target), string(evidence), f.Fingerprint()); err != nil {
 			return err
 		}
 	}

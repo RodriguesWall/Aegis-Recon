@@ -131,8 +131,12 @@ cd web && npm install && npm run dev   # http://localhost:5173
 Or bring up the API + dashboard together with Docker:
 
 ```bash
-docker compose up --build    # everything on http://localhost:8080 (single entry point)
+docker compose up --build -d   # start in the background; everything on http://localhost:8080
+docker compose logs -f         # follow logs (optional)
+docker compose down            # stop
 ```
+
+Drop `-d` to run in the foreground and watch the logs directly (Ctrl+C stops it).
 
 <!-- Dashboard screenshot: drop an image here, e.g. ![Dashboard](assets/dashboard.png) -->
 

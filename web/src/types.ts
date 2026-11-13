@@ -49,6 +49,15 @@ export interface ScanResult {
   findings: Finding[] | null
 }
 
+export interface ScanDiff {
+  current_scan_id: string
+  previous_scan_id: string // "" when there is no earlier completed scan
+  counts: { new: number; resolved: number; unchanged: number }
+  new: Finding[] | null
+  resolved: Finding[] | null
+  unchanged: Finding[] | null
+}
+
 export interface Progress {
   phase: string // discovery | probing | done | ""
   done: number

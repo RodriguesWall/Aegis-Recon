@@ -2,7 +2,13 @@
 // scanners, store and report layers. No business logic lives here.
 package model
 
-import "time"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"strings"
+	"time"
+)
 
 // Severity is the normalized finding severity. Ordered constants allow
 // comparison and aggregation.
@@ -115,6 +121,28 @@ type Finding struct {
 	Severity Severity       `json:"severity"`
 	Title    string         `json:"title"`
 	Evidence map[string]any `json:"evidence,omitempty"`
+}
+
+// Fingerprint returns a stable identifier for "the same finding" across scans.
+// It is derived from scanner + target(host:port) + title, so the same exposure
+// re-detected on a later scan hashes identically. This is the key that scan
+// diffing (new/resolved/unchanged) and triage (persisted status) hang on.
+//
+// Host falls back to Domain when empty (e.g. dns findings carry Domain only).
+// Title is lowercased and trimmed so cosmetic casing/spacing changes do not
+// fork the fingerprint. Port is included: the same host on a different port is
+// a distinct exposure and gets a distinct fingerprint. Fields are joined with a
+// NUL separator so values cannot run together into a collision.
+func (f Finding) Fingerprint() string {
+	host := f.Target.Host
+	if host == "" {
+		host = f.Target.Domain
+	}
+	target := fmt.Sprintf("%s:%d", strings.ToLower(host), f.Target.Port)
+	title := strings.ToLower(strings.TrimSpace(f.Title))
+	key := strings.Join([]string{strings.ToLower(f.Scanner), target, title}, "\x00")
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])
 }
 
 // ScanResult aggregates everything produced by one scan run.

@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../api/client"
 import { SeverityBadge, severityRank } from "../components/SeverityBadge"
 import { StatusPill } from "../components/StatusPill"
-import type { Finding, Progress, ScanResult } from "../types"
+import type { Finding, Progress, ScanDiff, ScanResult } from "../types"
 
 const POLL_MS = 1500
 
@@ -12,6 +12,7 @@ export function ScanDetail() {
   const navigate = useNavigate()
   const [data, setData] = useState<ScanResult | null>(null)
   const [progress, setProgress] = useState<Progress | null>(null)
+  const [diff, setDiff] = useState<ScanDiff | null>(null)
   const [error, setError] = useState("")
 
   useEffect(() => {
@@ -34,6 +35,14 @@ export function ScanDetail() {
           timer = setTimeout(tick, POLL_MS)
         } else {
           setProgress(null)
+          if (st === "COMPLETED") {
+            try {
+              const d = await api.getScanDiff(id)
+              if (active) setDiff(d)
+            } catch {
+              /* diff is best-effort */
+            }
+          }
         }
       } catch (e) {
         if (active) setError(String(e))
@@ -151,6 +160,8 @@ export function ScanDetail() {
         <div className="ml-auto text-muted">total: {findings.length}</div>
       </div>
 
+      {!running && diff && <ChangesCard diff={diff} />}
+
       {scan.error && (
         <details className="glass-card">
           <summary className="cursor-pointer text-sm font-semibold text-muted">
@@ -191,6 +202,55 @@ export function ScanDetail() {
         <p className="text-muted">No findings.</p>
       )}
     </div>
+  )
+}
+
+function ChangesCard({ diff }: { diff: ScanDiff }) {
+  const first = diff.previous_scan_id === ""
+  const newList = diff.new ?? []
+  const resolvedList = diff.resolved ?? []
+
+  return (
+    <div className="glass-card space-y-3">
+      <div className="flex flex-wrap items-center gap-4">
+        <h3 className="text-lg">
+          {first ? "First scan" : "Changes since last scan"}
+        </h3>
+        {first ? (
+          <span className="text-sm text-muted">No earlier scan to compare — all findings are new.</span>
+        ) : (
+          <div className="flex flex-wrap gap-4 text-sm">
+            <span className="text-sev-high">+{diff.counts.new} new</span>
+            <span className="text-sev-low">−{diff.counts.resolved} resolved</span>
+            <span className="text-muted">{diff.counts.unchanged} unchanged</span>
+          </div>
+        )}
+      </div>
+
+      {!first && newList.length > 0 && (
+        <ChangeList label="New" color="text-sev-high" items={newList} />
+      )}
+      {!first && resolvedList.length > 0 && (
+        <ChangeList label="Resolved" color="text-sev-low" items={resolvedList} />
+      )}
+    </div>
+  )
+}
+
+function ChangeList({ label, color, items }: { label: string; color: string; items: Finding[] }) {
+  return (
+    <details>
+      <summary className={`cursor-pointer text-sm font-semibold ${color}`}>
+        {label} ({items.length})
+      </summary>
+      <div className="mt-2 space-y-1">
+        {items.map((f, i) => (
+          <p key={i} className="text-xs text-muted">
+            {f.target.host || f.target.domain || "—"} · {f.scanner} · {f.title}
+          </p>
+        ))}
+      </div>
+    </details>
   )
 }
 

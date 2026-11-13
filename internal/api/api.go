@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RodriguesWall/aegis-recon/internal/diff"
 	"github.com/RodriguesWall/aegis-recon/internal/model"
 	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/queue"
@@ -49,6 +50,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/scans/{id}", s.getScan)
 	mux.HandleFunc("GET /api/scans/{id}/progress", s.getProgress)
 	mux.HandleFunc("GET /api/scans/{id}/export", s.exportScan)
+	mux.HandleFunc("GET /api/scans/{id}/diff", s.diffScan)
 	mux.HandleFunc("DELETE /api/scans/{id}", s.deleteScan)
 	return cors(mux)
 }
@@ -274,6 +276,62 @@ func (s *Server) getScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"scan": scan, "findings": findings})
+}
+
+// diffScan compares a scan against the previous COMPLETED scan of the same
+// asset, matching findings by fingerprint. The response carries the counts
+// (new/resolved/unchanged), the two scan ids, and the classified findings. When
+// there is no earlier completed scan, previous_scan_id is empty and every
+// current finding is reported as new.
+func (s *Server) diffScan(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	curr, err := s.store.GetScan(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "scan not found")
+		return
+	}
+	currFindings, err := s.store.ListFindings(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Scans come back newest-first. The previous scan is the first COMPLETED one
+	// created strictly before this scan.
+	scans, err := s.store.ListScans(r.Context(), curr.AssetID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var prevID string
+	for _, sc := range scans {
+		if sc.ID == id || sc.Status != model.StatusCompleted {
+			continue
+		}
+		if sc.CreatedAt.Before(curr.CreatedAt) {
+			prevID = sc.ID
+			break
+		}
+	}
+
+	var prevFindings []model.Finding
+	if prevID != "" {
+		prevFindings, err = s.store.ListFindings(r.Context(), prevID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	result := diff.Scans(currFindings, prevFindings)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"current_scan_id":  id,
+		"previous_scan_id": prevID,
+		"counts":           result.Counts(),
+		"new":              result.New,
+		"resolved":         result.Resolved,
+		"unchanged":        result.Unchanged,
+	})
 }
 
 // exportScan returns the scan's findings as a downloadable file. ?format=sarif
