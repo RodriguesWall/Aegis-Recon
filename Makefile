@@ -1,4 +1,4 @@
-.PHONY: build cli api test vet fmt fmtcheck ci clean
+.PHONY: build cli api seed test vet fmt fmtcheck ci clean
 
 BIN := bin
 
@@ -13,6 +13,11 @@ cli:
 
 api:
 	go build -ldflags "$(LDFLAGS)" -o $(BIN)/aegisd ./cmd/aegisd
+
+# Populate the DB with demo data (fake domains) for screenshots. Run on a fresh
+# DB, then start the app. Override the path with AEGIS_DB=...
+seed:
+	go run ./cmd/seed
 
 test:
 	go test ./...
