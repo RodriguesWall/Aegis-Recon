@@ -4,6 +4,7 @@ import { api } from "../api/client"
 import { BlacklistDialog } from "../components/BlacklistDialog"
 import { CardMenu } from "../components/CardMenu"
 import { ConfirmDialog } from "../components/ConfirmDialog"
+import { ScanSeverityTag } from "../components/SeverityBadge"
 import { StatusPill } from "../components/StatusPill"
 import type { Asset, Scan } from "../types"
 
@@ -198,6 +199,7 @@ function AssetCard({
                 <Link to={`/scans/${s.id}`} className="flex flex-1 items-center justify-between gap-2">
                   <span className="flex items-center gap-2">
                     <StatusPill status={s.status} />
+                    <ScanSeverityTag value={s.top_severity} />
                     <span className="text-muted">
                       {new Date(s.created_at).toLocaleString()}
                     </span>

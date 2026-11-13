@@ -3,7 +3,8 @@ import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../api/client"
 import { SeverityBadge, severityRank } from "../components/SeverityBadge"
 import { StatusPill } from "../components/StatusPill"
-import type { Finding, Progress, ScanDiff, ScanResult } from "../types"
+import { TriageControl } from "../components/TriageControl"
+import type { Finding, Progress, ScanDiff, ScanResult, Triage } from "../types"
 
 const POLL_MS = 1500
 
@@ -13,7 +14,27 @@ export function ScanDetail() {
   const [data, setData] = useState<ScanResult | null>(null)
   const [progress, setProgress] = useState<Progress | null>(null)
   const [diff, setDiff] = useState<ScanDiff | null>(null)
+  const [hideFP, setHideFP] = useState(false)
+  const [hideFixed, setHideFixed] = useState(false)
   const [error, setError] = useState("")
+
+  // Refetch scan (and diff, once settled) after a triage change. Triage can
+  // change the diff counts (a suppressed finding stops being NEW).
+  async function refresh() {
+    try {
+      const res = await api.getScan(id)
+      setData(res)
+      if (res.scan.status === "COMPLETED") {
+        try {
+          setDiff(await api.getScanDiff(id))
+        } catch {
+          /* diff is best-effort */
+        }
+      }
+    } catch (e) {
+      setError(String(e))
+    }
+  }
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>
@@ -56,11 +77,24 @@ export function ScanDetail() {
   }, [id])
 
   const findings = data?.findings ?? []
+  const triage: Record<string, Triage> = data?.triage ?? {}
+
+  // Filter out statuses the operator chose to hide (per the sidebar toggles).
+  const visibleFindings = useMemo(
+    () =>
+      findings.filter((f) => {
+        const st = triage[f.fingerprint]?.status
+        if (hideFP && st === "false-positive") return false
+        if (hideFixed && st === "fixed") return false
+        return true
+      }),
+    [findings, triage, hideFP, hideFixed],
+  )
 
   // Group findings by host, hosts sorted, findings by severity desc.
   const groups = useMemo(() => {
     const byHost: Record<string, Finding[]> = {}
-    for (const f of findings) {
+    for (const f of visibleFindings) {
       const host = f.target.host || f.target.domain || "—"
       ;(byHost[host] ??= []).push(f)
     }
@@ -70,7 +104,7 @@ export function ScanDetail() {
     return Object.keys(byHost)
       .sort()
       .map((host) => ({ host, items: byHost[host] }))
-  }, [findings])
+  }, [visibleFindings])
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {}
@@ -170,6 +204,30 @@ export function ScanDetail() {
           </div>
 
           {!running && diff && <ChangesCard diff={diff} />}
+
+          {!running && findings.length > 0 && (
+            <div className="glass-card flex flex-col gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+                Filters
+              </p>
+              <label className="flex items-center gap-2 text-sm text-muted">
+                <input
+                  type="checkbox"
+                  checked={hideFP}
+                  onChange={(e) => setHideFP(e.target.checked)}
+                />
+                Hide false positives
+              </label>
+              <label className="flex items-center gap-2 text-sm text-muted">
+                <input
+                  type="checkbox"
+                  checked={hideFixed}
+                  onChange={(e) => setHideFixed(e.target.checked)}
+                />
+                Hide fixed
+              </label>
+            </div>
+          )}
         </aside>
 
         <div className="min-w-0 space-y-6 lg:order-1">
@@ -196,13 +254,19 @@ export function ScanDetail() {
                     className="flex items-start gap-3 border-t border-white/5 pt-2 first:border-0 first:pt-0"
                   >
                     <SeverityBadge severity={f.severity} />
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="text-white">{f.title}</p>
                       <p className="text-xs text-muted">
                         {f.scanner}
                         {f.evidence ? " · " + shortEvidence(f.evidence) : ""}
                       </p>
                     </div>
+                    <TriageControl
+                      assetID={scan.asset_id}
+                      fingerprint={f.fingerprint}
+                      current={triage[f.fingerprint]}
+                      onSaved={refresh}
+                    />
                   </div>
                 ))}
               </div>

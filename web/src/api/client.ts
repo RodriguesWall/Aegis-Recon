@@ -1,4 +1,13 @@
-import type { Asset, Progress, Project, Scan, ScanDiff, ScanResult } from "../types"
+import type {
+  Asset,
+  Progress,
+  Project,
+  Scan,
+  ScanDiff,
+  ScanResult,
+  Triage,
+  TriageStatus,
+} from "../types"
 
 // Same-origin: Vite dev proxies /api to the Go API; nginx does so in prod.
 const BASE = "/api"
@@ -41,6 +50,10 @@ export const api = {
     req<Asset>(`/assets/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
   setAssetBlacklist: (id: string, blacklist: string[]) =>
     req<Asset>(`/assets/${id}`, { method: "PATCH", body: JSON.stringify({ blacklist }) }),
+  setTriage: (
+    assetID: string,
+    body: { fingerprint: string; status: TriageStatus; note?: string },
+  ) => req<Triage>(`/assets/${assetID}/triage`, { method: "PUT", body: JSON.stringify(body) }),
   deleteAsset: (id: string) => req<void>(`/assets/${id}`, { method: "DELETE" }),
 
   listScans: (assetID: string) => req<Scan[]>(`/assets/${assetID}/scans`),

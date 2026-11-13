@@ -43,6 +43,25 @@ func (r Result) Counts() Counts {
 	}
 }
 
+// SuppressNew reclassifies NEW findings whose fingerprint is marked suppressed
+// (e.g. triaged false-positive / accepted-risk) as unchanged, so an already
+// judged finding never resurfaces as NEW. Resolved and unchanged are untouched.
+// Returns a new Result; the receiver is not mutated.
+func (r Result) SuppressNew(suppressed map[string]bool) Result {
+	if len(suppressed) == 0 {
+		return r
+	}
+	out := Result{Resolved: r.Resolved, Unchanged: r.Unchanged}
+	for _, f := range r.New {
+		if suppressed[f.Fingerprint()] {
+			out.Unchanged = append(out.Unchanged, f)
+		} else {
+			out.New = append(out.New, f)
+		}
+	}
+	return out
+}
+
 // Scans compares a current scan against a previous one, matching findings by
 // fingerprint.
 //

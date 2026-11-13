@@ -149,6 +149,45 @@ func (f Finding) Fingerprint() string {
 	return hex.EncodeToString(sum[:])
 }
 
+// TriageStatus is a human-assigned judgement on a finding. Aegis never sets it
+// automatically; it only persists what the operator decided so re-scans keep the
+// verdict. Absence of a record means StatusOpen.
+type TriageStatus string
+
+const (
+	TriageOpen          TriageStatus = "open"
+	TriageFalsePositive TriageStatus = "false-positive"
+	TriageAcceptedRisk  TriageStatus = "accepted-risk"
+	TriageFixed         TriageStatus = "fixed"
+)
+
+// ValidTriageStatus reports whether s is a known triage status.
+func ValidTriageStatus(s TriageStatus) bool {
+	switch s {
+	case TriageOpen, TriageFalsePositive, TriageAcceptedRisk, TriageFixed:
+		return true
+	}
+	return false
+}
+
+// SuppressesNew reports whether this status stops its finding from being flagged
+// NEW in a scan diff. false-positive and accepted-risk are already-judged, so
+// they stay quiet; fixed does not suppress, so a fixed finding that reappears
+// surfaces as NEW again (a regression).
+func (s TriageStatus) SuppressesNew() bool {
+	return s == TriageFalsePositive || s == TriageAcceptedRisk
+}
+
+// Triage is the persisted verdict for one finding on one asset, keyed by
+// asset_id + fingerprint so it survives re-scans.
+type Triage struct {
+	AssetID     string       `json:"asset_id"`
+	Fingerprint string       `json:"fingerprint"`
+	Status      TriageStatus `json:"status"`
+	Note        string       `json:"note,omitempty"`
+	UpdatedAt   time.Time    `json:"updated_at"`
+}
+
 // ScanResult aggregates everything produced by one scan run.
 type ScanResult struct {
 	Domain   string    `json:"domain"`

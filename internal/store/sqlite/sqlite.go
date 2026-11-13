@@ -92,6 +92,14 @@ CREATE TABLE IF NOT EXISTS findings (
 CREATE INDEX IF NOT EXISTS idx_assets_project ON assets(project_id);
 CREATE INDEX IF NOT EXISTS idx_scans_asset   ON scans(asset_id);
 CREATE INDEX IF NOT EXISTS idx_findings_scan ON findings(scan_id);
+CREATE TABLE IF NOT EXISTS triage (
+	asset_id    TEXT NOT NULL REFERENCES assets(id),
+	fingerprint TEXT NOT NULL,
+	status      TEXT NOT NULL,
+	note        TEXT NOT NULL DEFAULT '',
+	updated_at  TIMESTAMP NOT NULL,
+	PRIMARY KEY (asset_id, fingerprint)
+);
 `
 
 // Migrate creates the schema if absent.
@@ -196,6 +204,7 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 		{`DELETE FROM findings WHERE scan_id IN (
 			SELECT s.id FROM scans s JOIN assets a ON s.asset_id = a.id WHERE a.project_id = ?)`, []any{id}},
 		{`DELETE FROM scans WHERE asset_id IN (SELECT id FROM assets WHERE project_id = ?)`, []any{id}},
+		{`DELETE FROM triage WHERE asset_id IN (SELECT id FROM assets WHERE project_id = ?)`, []any{id}},
 		{`DELETE FROM assets WHERE project_id = ?`, []any{id}},
 		{`DELETE FROM projects WHERE id = ?`, []any{id}},
 	}
@@ -220,6 +229,7 @@ func (s *Store) DeleteAsset(ctx context.Context, id string) error {
 	stmts := []string{
 		`DELETE FROM findings WHERE scan_id IN (SELECT id FROM scans WHERE asset_id = ?)`,
 		`DELETE FROM scans WHERE asset_id = ?`,
+		`DELETE FROM triage WHERE asset_id = ?`,
 		`DELETE FROM assets WHERE id = ?`,
 	}
 	for _, q := range stmts {
@@ -417,6 +427,93 @@ func (s *Store) ListFindings(ctx context.Context, scanID string) ([]model.Findin
 		_ = json.Unmarshal([]byte(target), &f.Target)
 		_ = json.Unmarshal([]byte(evidence), &f.Evidence)
 		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// TopSeverities returns, for each scan of the asset that has findings, the
+// highest severity present. One query: rank severities in SQL and take the max.
+func (s *Store) TopSeverities(ctx context.Context, assetID string) (map[string]model.Severity, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT f.scan_id,
+		        MAX(CASE f.severity
+		            WHEN 'critical' THEN 5
+		            WHEN 'high'     THEN 4
+		            WHEN 'medium'   THEN 3
+		            WHEN 'low'      THEN 2
+		            WHEN 'info'     THEN 1
+		            ELSE 0 END) AS rank
+		 FROM findings f
+		 JOIN scans sc ON sc.id = f.scan_id
+		 WHERE sc.asset_id = ?
+		 GROUP BY f.scan_id`, assetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]model.Severity{}
+	for rows.Next() {
+		var scanID string
+		var rank int
+		if err := rows.Scan(&scanID, &rank); err != nil {
+			return nil, err
+		}
+		if sev := severityForRank(rank); sev != "" {
+			out[scanID] = sev
+		}
+	}
+	return out, rows.Err()
+}
+
+func severityForRank(rank int) model.Severity {
+	switch rank {
+	case 5:
+		return model.SeverityCritical
+	case 4:
+		return model.SeverityHigh
+	case 3:
+		return model.SeverityMedium
+	case 2:
+		return model.SeverityLow
+	case 1:
+		return model.SeverityInfo
+	}
+	return ""
+}
+
+// SetTriage upserts a verdict. StatusOpen deletes the record (open is the
+// absence of triage), so the table only holds active verdicts.
+func (s *Store) SetTriage(ctx context.Context, t *model.Triage) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	if t.Status == model.TriageOpen {
+		_, err := s.db.ExecContext(ctx,
+			`DELETE FROM triage WHERE asset_id = ? AND fingerprint = ?`, t.AssetID, t.Fingerprint)
+		return err
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO triage (asset_id, fingerprint, status, note, updated_at)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(asset_id, fingerprint)
+		 DO UPDATE SET status = excluded.status, note = excluded.note, updated_at = excluded.updated_at`,
+		t.AssetID, t.Fingerprint, t.Status, t.Note, t.UpdatedAt)
+	return err
+}
+
+func (s *Store) ListTriage(ctx context.Context, assetID string) ([]model.Triage, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT asset_id, fingerprint, status, note, updated_at FROM triage WHERE asset_id = ?`, assetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.Triage
+	for rows.Next() {
+		var t model.Triage
+		if err := rows.Scan(&t.AssetID, &t.Fingerprint, &t.Status, &t.Note, &t.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
 	}
 	return out, rows.Err()
 }

@@ -41,6 +41,15 @@ type Store interface {
 
 	SaveFindings(ctx context.Context, scanID string, fs []model.Finding) error
 	ListFindings(ctx context.Context, scanID string) ([]model.Finding, error)
+	// TopSeverities returns the highest-severity finding per scan for an asset,
+	// keyed by scan ID. Scans with no findings are absent from the map.
+	TopSeverities(ctx context.Context, assetID string) (map[string]model.Severity, error)
+
+	// SetTriage upserts the operator's verdict for one finding on one asset
+	// (keyed by asset_id + fingerprint). StatusOpen deletes the record.
+	SetTriage(ctx context.Context, t *model.Triage) error
+	// ListTriage returns all triage records for an asset.
+	ListTriage(ctx context.Context, assetID string) ([]model.Triage, error)
 
 	Close() error
 }

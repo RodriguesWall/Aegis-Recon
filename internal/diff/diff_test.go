@@ -51,6 +51,25 @@ func TestScansEmptyCurrentAllResolved(t *testing.T) {
 	}
 }
 
+func TestSuppressNew(t *testing.T) {
+	keep := f("tls", "a.com", 443, "weak ciph")
+	fp := f("port", "a.com", 3306, "mysql exposed")
+	r := Result{New: []model.Finding{keep, fp}}
+
+	out := r.SuppressNew(map[string]bool{fp.Fingerprint(): true})
+	c := out.Counts()
+	if c.New != 1 || c.Unchanged != 1 {
+		t.Fatalf("suppressed finding should move new->unchanged, got %+v", c)
+	}
+	if out.New[0].Scanner != "tls" {
+		t.Fatalf("wrong finding kept as new: %+v", out.New)
+	}
+	// Empty suppressed set is a no-op.
+	if got := r.SuppressNew(nil).Counts(); got.New != 2 {
+		t.Fatalf("nil suppressed must be no-op, got %+v", got)
+	}
+}
+
 func TestScansDedupsWithinScan(t *testing.T) {
 	// Duplicate fingerprints in either scan must collapse to one entry.
 	dup := f("port", "a.com", 80, "open 80")

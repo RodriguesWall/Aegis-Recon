@@ -29,6 +29,9 @@ export interface Scan {
   started_at?: string
   completed_at?: string
   error?: string
+  // Highest finding severity in the list view: a severity, "clean", or "" while
+  // the scan is still running.
+  top_severity?: string
 }
 
 export interface Target {
@@ -43,11 +46,23 @@ export interface Finding {
   severity: Severity
   title: string
   evidence?: Record<string, unknown>
+  fingerprint: string
+}
+
+export type TriageStatus = "open" | "false-positive" | "accepted-risk" | "fixed"
+
+export interface Triage {
+  asset_id: string
+  fingerprint: string
+  status: TriageStatus
+  note?: string
+  updated_at: string
 }
 
 export interface ScanResult {
   scan: Scan
   findings: Finding[] | null
+  triage?: Record<string, Triage>
 }
 
 export interface ScanDiff {
