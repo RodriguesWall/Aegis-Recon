@@ -178,6 +178,17 @@ func (s TriageStatus) SuppressesNew() bool {
 	return s == TriageFalsePositive || s == TriageAcceptedRisk
 }
 
+// Schedule drives automatic scans for one asset at a fixed interval. One per
+// asset (keyed by AssetID). A background ticker enqueues a scan when NextRun is
+// due, then advances NextRun by the interval.
+type Schedule struct {
+	AssetID         string    `json:"asset_id"`
+	IntervalMinutes int       `json:"interval_minutes"`
+	NextRun         time.Time `json:"next_run"`
+	Enabled         bool      `json:"enabled"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
 // Triage is the persisted verdict for one finding on one asset, keyed by
 // asset_id + fingerprint so it survives re-scans.
 type Triage struct {

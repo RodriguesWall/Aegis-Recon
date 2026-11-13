@@ -65,6 +65,14 @@ export interface ScanResult {
   triage?: Record<string, Triage>
 }
 
+export interface Schedule {
+  asset_id: string
+  interval_minutes: number
+  next_run: string
+  enabled: boolean
+  updated_at?: string
+}
+
 export interface ScanDiff {
   current_scan_id: string
   previous_scan_id: string // "" when there is no earlier completed scan

@@ -52,6 +52,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/scans/{id}/export", s.exportScan)
 	mux.HandleFunc("GET /api/scans/{id}/diff", s.diffScan)
 	mux.HandleFunc("PUT /api/assets/{id}/triage", s.setTriage)
+	mux.HandleFunc("GET /api/assets/{id}/schedule", s.getSchedule)
+	mux.HandleFunc("PUT /api/assets/{id}/schedule", s.setSchedule)
 	mux.HandleFunc("DELETE /api/scans/{id}", s.deleteScan)
 	return cors(mux)
 }
@@ -373,6 +375,57 @@ func (s *Server) setTriage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, t)
+}
+
+// getSchedule returns the asset's scan schedule. When none exists it returns a
+// default disabled schedule rather than 404, so the UI always has a shape.
+func (s *Server) getSchedule(w http.ResponseWriter, r *http.Request) {
+	assetID := r.PathValue("id")
+	if _, err := s.store.GetAsset(r.Context(), assetID); err != nil {
+		writeErr(w, http.StatusNotFound, "asset not found")
+		return
+	}
+	sc, err := s.store.GetSchedule(r.Context(), assetID)
+	if err != nil {
+		// No schedule yet: hand back a disabled default.
+		writeJSON(w, http.StatusOK, &model.Schedule{AssetID: assetID, Enabled: false})
+		return
+	}
+	writeJSON(w, http.StatusOK, sc)
+}
+
+// setSchedule upserts the asset's scan schedule. Body: {enabled, interval_minutes}.
+// When enabled, interval_minutes must be > 0 and next_run is set to now+interval.
+func (s *Server) setSchedule(w http.ResponseWriter, r *http.Request) {
+	assetID := r.PathValue("id")
+	if _, err := s.store.GetAsset(r.Context(), assetID); err != nil {
+		writeErr(w, http.StatusNotFound, "asset not found")
+		return
+	}
+	var in struct {
+		Enabled         bool `json:"enabled"`
+		IntervalMinutes int  `json:"interval_minutes"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if in.Enabled && in.IntervalMinutes <= 0 {
+		writeErr(w, http.StatusBadRequest, "interval_minutes must be > 0 when enabled")
+		return
+	}
+	now := time.Now().UTC()
+	sc := &model.Schedule{
+		AssetID:         assetID,
+		IntervalMinutes: in.IntervalMinutes,
+		Enabled:         in.Enabled,
+		NextRun:         now.Add(time.Duration(in.IntervalMinutes) * time.Minute),
+		UpdatedAt:       now,
+	}
+	if err := s.store.SetSchedule(r.Context(), sc); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, sc)
 }
 
 // diffScan compares a scan against the previous COMPLETED scan of the same

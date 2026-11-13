@@ -138,7 +138,22 @@ docker compose down            # stop
 
 Drop `-d` to run in the foreground and watch the logs directly (Ctrl+C stops it).
 
-<!-- Dashboard screenshot: drop an image here, e.g. ![Dashboard](assets/dashboard.png) -->
+---
+
+## Screenshots
+
+> Demo data (fake domains). Generate your own with `make seed`.
+
+**Services** — assets per project, each previous scan tagged with its highest
+severity (or `Clean`):
+
+![Services view](assets/1.jpeg)
+
+**Scan report** — findings grouped by host with a severity summary, change
+detection vs the previous scan, and per-finding triage (open / false-positive /
+accepted-risk / fixed):
+
+![Scan report](assets/2.jpeg)
 
 ---
 
