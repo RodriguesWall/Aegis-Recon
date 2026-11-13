@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -21,9 +22,14 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/queue"
 	"github.com/RodriguesWall/aegis-recon/internal/scansvc"
 	"github.com/RodriguesWall/aegis-recon/internal/store/sqlite"
+	"github.com/RodriguesWall/aegis-recon/internal/version"
 )
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "-version" || os.Args[1] == "--version") {
+		fmt.Println("aegisd", version.Version)
+		return
+	}
 	// Healthcheck mode: used by the Docker HEALTHCHECK. Runs inside the container
 	// (distroless has no shell/curl), hits /health locally, exits 0 (ok) or 1.
 	if len(os.Args) > 1 && (os.Args[1] == "-health" || os.Args[1] == "--health") {

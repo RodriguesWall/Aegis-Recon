@@ -111,7 +111,7 @@ func (s *Service) Run(ctx context.Context, scanID string) (err error) {
 		engine.WithReachable(s.reachable),
 		engine.WithProgress(prog),
 	)
-	sc := scope.New(domain)
+	sc := scope.New(domain).Deny(asset.Blacklist)
 	result := eng.RunPipeline(ctx, domain, s.discoverers, sc.Filter)
 
 	findings := result.Findings

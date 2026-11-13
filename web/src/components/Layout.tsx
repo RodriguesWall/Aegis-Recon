@@ -1,6 +1,14 @@
+import { useEffect, useState } from "react"
 import { Link, Outlet } from "react-router-dom"
+import { api } from "../api/client"
 
 export function Layout() {
+  const [version, setVersion] = useState("")
+
+  useEffect(() => {
+    void api.getHealth().then((h) => setVersion(h.version ?? ""))
+  }, [])
+
   return (
     <div className="flex min-h-screen flex-col">
       <nav
@@ -25,7 +33,7 @@ export function Layout() {
         style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}
       >
         © {new Date().getFullYear()} Aegis-Recon · open-source attack surface scanner ·
-        authorized use only
+        authorized use only{version && ` · ${version}`}
       </footer>
     </div>
   )

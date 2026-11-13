@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { api } from "../api/client"
+import { BlacklistDialog } from "../components/BlacklistDialog"
 import { CardMenu } from "../components/CardMenu"
 import { ConfirmDialog } from "../components/ConfirmDialog"
+import { ScanSeverityTag } from "../components/SeverityBadge"
 import { StatusPill } from "../components/StatusPill"
 import type { Asset, Scan } from "../types"
+
+const POLL_MS = 2000
 
 export function ProjectDetail() {
   const { id = "" } = useParams()
@@ -31,6 +35,19 @@ export function ProjectDetail() {
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  // Scans run server-side in the background. While any is still PENDING or
+  // PROCESSING, refresh the list so its status updates on its own — without this
+  // the list freezes at the status it had when the page mounted (see Notes #17).
+  const hasActive = Object.values(scansByAsset).some((list) =>
+    list.some((s) => s.status === "PENDING" || s.status === "PROCESSING"),
+  )
+  useEffect(() => {
+    if (!hasActive) return
+    const t = setInterval(() => void load(), POLL_MS)
+    return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasActive])
 
   async function addAsset(e: React.FormEvent) {
     e.preventDefault()
@@ -96,6 +113,7 @@ function AssetCard({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(asset.name)
   const [confirm, setConfirm] = useState(false)
+  const [blacklistOpen, setBlacklistOpen] = useState(false)
   const [scanToDelete, setScanToDelete] = useState<string | null>(null)
   const [includeInfo, setIncludeInfo] = useState(false)
 
@@ -149,6 +167,10 @@ function AssetCard({
         <CardMenu
           items={[
             { label: "Edit", onClick: () => setEditing(true) },
+            {
+              label: `Blacklist${asset.blacklist?.length ? ` (${asset.blacklist.length})` : ""}`,
+              onClick: () => setBlacklistOpen(true),
+            },
             { label: "Delete", danger: true, onClick: () => setConfirm(true) },
           ]}
         />
@@ -177,6 +199,7 @@ function AssetCard({
                 <Link to={`/scans/${s.id}`} className="flex flex-1 items-center justify-between gap-2">
                   <span className="flex items-center gap-2">
                     <StatusPill status={s.status} />
+                    <ScanSeverityTag value={s.top_severity} />
                     <span className="text-muted">
                       {new Date(s.created_at).toLocaleString()}
                     </span>
@@ -196,6 +219,19 @@ function AssetCard({
             ))}
           </div>
         </div>
+      )}
+
+      {blacklistOpen && (
+        <BlacklistDialog
+          assetName={asset.name}
+          initial={asset.blacklist ?? []}
+          onCancel={() => setBlacklistOpen(false)}
+          onSave={async (patterns) => {
+            await api.setAssetBlacklist(asset.id, patterns)
+            setBlacklistOpen(false)
+            onChanged()
+          }}
+        />
       )}
 
       {confirm && (

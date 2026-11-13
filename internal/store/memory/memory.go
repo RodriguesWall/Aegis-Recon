@@ -21,6 +21,8 @@ type Store struct {
 	assets   map[string]model.Asset
 	scans    map[string]model.Scan
 	findings map[string][]model.Finding
+	// triage is keyed by asset_id + "\x00" + fingerprint.
+	triage map[string]model.Triage
 }
 
 // New returns an empty in-memory store.
@@ -30,7 +32,12 @@ func New() *Store {
 		assets:   map[string]model.Asset{},
 		scans:    map[string]model.Scan{},
 		findings: map[string][]model.Finding{},
+		triage:   map[string]model.Triage{},
 	}
+}
+
+func triageKey(assetID, fingerprint string) string {
+	return assetID + "\x00" + fingerprint
 }
 
 func (s *Store) Migrate(context.Context) error { return nil }
@@ -106,6 +113,11 @@ func (s *Store) deleteAssetLocked(id string) {
 		if sc.AssetID == id {
 			delete(s.findings, sid)
 			delete(s.scans, sid)
+		}
+	}
+	for k, t := range s.triage {
+		if t.AssetID == id {
+			delete(s.triage, k)
 		}
 	}
 	delete(s.assets, id)
@@ -221,6 +233,53 @@ func (s *Store) ListFindings(_ context.Context, scanID string) ([]model.Finding,
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return append([]model.Finding(nil), s.findings[scanID]...), nil
+}
+
+func (s *Store) TopSeverities(_ context.Context, assetID string) (map[string]model.Severity, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := map[string]model.Severity{}
+	for sid, sc := range s.scans {
+		if sc.AssetID != assetID {
+			continue
+		}
+		best := model.Severity("")
+		bestRank := 0
+		for _, f := range s.findings[sid] {
+			if r := f.Severity.Rank(); r > bestRank {
+				bestRank = r
+				best = f.Severity
+			}
+		}
+		if best != "" {
+			out[sid] = best
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) SetTriage(_ context.Context, t *model.Triage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := triageKey(t.AssetID, t.Fingerprint)
+	if t.Status == model.TriageOpen {
+		delete(s.triage, k)
+		return nil
+	}
+	s.triage[k] = *t
+	return nil
+}
+
+func (s *Store) ListTriage(_ context.Context, assetID string) ([]model.Triage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []model.Triage
+	for _, t := range s.triage {
+		if t.AssetID == assetID {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 // compile-time check.

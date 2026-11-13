@@ -3,7 +3,8 @@ import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../api/client"
 import { SeverityBadge, severityRank } from "../components/SeverityBadge"
 import { StatusPill } from "../components/StatusPill"
-import type { Finding, Progress, ScanResult } from "../types"
+import { TriageControl } from "../components/TriageControl"
+import type { Finding, Progress, ScanDiff, ScanResult, Triage } from "../types"
 
 const POLL_MS = 1500
 
@@ -12,7 +13,28 @@ export function ScanDetail() {
   const navigate = useNavigate()
   const [data, setData] = useState<ScanResult | null>(null)
   const [progress, setProgress] = useState<Progress | null>(null)
+  const [diff, setDiff] = useState<ScanDiff | null>(null)
+  const [hideFP, setHideFP] = useState(false)
+  const [hideFixed, setHideFixed] = useState(false)
   const [error, setError] = useState("")
+
+  // Refetch scan (and diff, once settled) after a triage change. Triage can
+  // change the diff counts (a suppressed finding stops being NEW).
+  async function refresh() {
+    try {
+      const res = await api.getScan(id)
+      setData(res)
+      if (res.scan.status === "COMPLETED") {
+        try {
+          setDiff(await api.getScanDiff(id))
+        } catch {
+          /* diff is best-effort */
+        }
+      }
+    } catch (e) {
+      setError(String(e))
+    }
+  }
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>
@@ -34,6 +56,14 @@ export function ScanDetail() {
           timer = setTimeout(tick, POLL_MS)
         } else {
           setProgress(null)
+          if (st === "COMPLETED") {
+            try {
+              const d = await api.getScanDiff(id)
+              if (active) setDiff(d)
+            } catch {
+              /* diff is best-effort */
+            }
+          }
         }
       } catch (e) {
         if (active) setError(String(e))
@@ -47,11 +77,24 @@ export function ScanDetail() {
   }, [id])
 
   const findings = data?.findings ?? []
+  const triage: Record<string, Triage> = data?.triage ?? {}
+
+  // Filter out statuses the operator chose to hide (per the sidebar toggles).
+  const visibleFindings = useMemo(
+    () =>
+      findings.filter((f) => {
+        const st = triage[f.fingerprint]?.status
+        if (hideFP && st === "false-positive") return false
+        if (hideFixed && st === "fixed") return false
+        return true
+      }),
+    [findings, triage, hideFP, hideFixed],
+  )
 
   // Group findings by host, hosts sorted, findings by severity desc.
   const groups = useMemo(() => {
     const byHost: Record<string, Finding[]> = {}
-    for (const f of findings) {
+    for (const f of visibleFindings) {
       const host = f.target.host || f.target.domain || "—"
       ;(byHost[host] ??= []).push(f)
     }
@@ -61,7 +104,7 @@ export function ScanDetail() {
     return Object.keys(byHost)
       .sort()
       .map((host) => ({ host, items: byHost[host] }))
-  }, [findings])
+  }, [visibleFindings])
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {}
@@ -141,56 +184,150 @@ export function ScanDetail() {
         </div>
       )}
 
-      <div className="glass-card flex flex-wrap gap-4">
-        {(["critical", "high", "medium", "low", "info"] as const).map((sev) => (
-          <div key={sev} className="flex items-center gap-2">
-            <SeverityBadge severity={sev} />
-            <span className="text-white">{counts[sev] ?? 0}</span>
-          </div>
-        ))}
-        <div className="ml-auto text-muted">total: {findings.length}</div>
-      </div>
-
-      {scan.error && (
-        <details className="glass-card">
-          <summary className="cursor-pointer text-sm font-semibold text-muted">
-            Module warnings ({scan.error.split(";").length})
-          </summary>
-          <p className="mt-1 text-xs text-muted">
-            Non-fatal errors while probing some hosts (e.g. no service on the port).
-            They do not stop the scan.
-          </p>
-          <p className="mt-2 break-words text-xs text-muted">{scan.error}</p>
-        </details>
-      )}
-
-      {groups.map((g) => (
-        <div key={g.host} className="glass-card">
-          <h3 className="mb-3 text-lg">{g.host}</h3>
-          <div className="space-y-2">
-            {g.items.map((f, i) => (
-              <div
-                key={i}
-                className="flex items-start gap-3 border-t border-white/5 pt-2 first:border-0 first:pt-0"
-              >
-                <SeverityBadge severity={f.severity} />
-                <div className="min-w-0">
-                  <p className="text-white">{f.title}</p>
-                  <p className="text-xs text-muted">
-                    {f.scanner}
-                    {f.evidence ? " · " + shortEvidence(f.evidence) : ""}
-                  </p>
-                </div>
+      <div className="grid gap-6 lg:grid-cols-[1fr_320px] lg:items-start">
+        {/* Right rail: report info (severity summary + changes). Stacks above
+            the findings on narrow screens; sticks alongside them on wide ones. */}
+        <aside className="space-y-4 lg:order-2 lg:sticky lg:top-20">
+          <div className="glass-card flex flex-col gap-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+              Severity
+            </p>
+            {(["critical", "high", "medium", "low", "info"] as const).map((sev) => (
+              <div key={sev} className="flex items-center justify-between gap-2">
+                <SeverityBadge severity={sev} />
+                <span className="text-white">{counts[sev] ?? 0}</span>
               </div>
             ))}
+            <div className="mt-1 border-t border-white/10 pt-2 text-sm text-muted">
+              total: {findings.length}
+            </div>
           </div>
-        </div>
-      ))}
 
-      {!running && findings.length === 0 && (
-        <p className="text-muted">No findings.</p>
+          {!running && diff && <ChangesCard diff={diff} />}
+
+          {!running && findings.length > 0 && (
+            <div className="glass-card flex flex-col gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+                Filters
+              </p>
+              <label className="flex items-center gap-2 text-sm text-muted">
+                <input
+                  type="checkbox"
+                  checked={hideFP}
+                  onChange={(e) => setHideFP(e.target.checked)}
+                />
+                Hide false positives
+              </label>
+              <label className="flex items-center gap-2 text-sm text-muted">
+                <input
+                  type="checkbox"
+                  checked={hideFixed}
+                  onChange={(e) => setHideFixed(e.target.checked)}
+                />
+                Hide fixed
+              </label>
+            </div>
+          )}
+        </aside>
+
+        <div className="min-w-0 space-y-6 lg:order-1">
+          {scan.error && (
+            <details className="glass-card">
+              <summary className="cursor-pointer text-sm font-semibold text-muted">
+                Module warnings ({scan.error.split(";").length})
+              </summary>
+              <p className="mt-1 text-xs text-muted">
+                Non-fatal errors while probing some hosts (e.g. no service on the port).
+                They do not stop the scan.
+              </p>
+              <p className="mt-2 break-words text-xs text-muted">{scan.error}</p>
+            </details>
+          )}
+
+          {groups.map((g) => (
+            <div key={g.host} className="glass-card">
+              <h3 className="mb-3 text-lg">{g.host}</h3>
+              <div className="space-y-2">
+                {g.items.map((f, i) => (
+                  <div
+                    key={i}
+                    className="flex items-start gap-3 border-t border-white/5 pt-2 first:border-0 first:pt-0"
+                  >
+                    <SeverityBadge severity={f.severity} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-white">{f.title}</p>
+                      <p className="text-xs text-muted">
+                        {f.scanner}
+                        {f.evidence ? " · " + shortEvidence(f.evidence) : ""}
+                      </p>
+                    </div>
+                    <TriageControl
+                      assetID={scan.asset_id}
+                      fingerprint={f.fingerprint}
+                      current={triage[f.fingerprint]}
+                      onSaved={refresh}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          {!running && findings.length === 0 && (
+            <p className="text-muted">No findings.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ChangesCard({ diff }: { diff: ScanDiff }) {
+  const first = diff.previous_scan_id === ""
+  const newList = diff.new ?? []
+  const resolvedList = diff.resolved ?? []
+
+  return (
+    <div className="glass-card space-y-3">
+      <div className="flex flex-wrap items-center gap-4">
+        <h3 className="text-lg">
+          {first ? "First scan" : "Changes since last scan"}
+        </h3>
+        {first ? (
+          <span className="text-sm text-muted">No earlier scan to compare — all findings are new.</span>
+        ) : (
+          <div className="flex flex-wrap gap-4 text-sm">
+            <span className="text-sev-high">+{diff.counts.new} new</span>
+            <span className="text-sev-low">−{diff.counts.resolved} resolved</span>
+            <span className="text-muted">{diff.counts.unchanged} unchanged</span>
+          </div>
+        )}
+      </div>
+
+      {!first && newList.length > 0 && (
+        <ChangeList label="New" color="text-sev-high" items={newList} />
+      )}
+      {!first && resolvedList.length > 0 && (
+        <ChangeList label="Resolved" color="text-sev-low" items={resolvedList} />
       )}
     </div>
+  )
+}
+
+function ChangeList({ label, color, items }: { label: string; color: string; items: Finding[] }) {
+  return (
+    <details>
+      <summary className={`cursor-pointer text-sm font-semibold ${color}`}>
+        {label} ({items.length})
+      </summary>
+      <div className="mt-2 space-y-1">
+        {items.map((f, i) => (
+          <p key={i} className="text-xs text-muted">
+            {f.target.host || f.target.domain || "—"} · {f.scanner} · {f.title}
+          </p>
+        ))}
+      </div>
+    </details>
   )
 }
 

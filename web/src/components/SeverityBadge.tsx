@@ -28,3 +28,20 @@ export function SeverityBadge({ severity }: { severity: Severity }) {
     </span>
   )
 }
+
+// ScanSeverityTag shows a scan's highest finding severity, or a green "Clean"
+// badge when there are none. Empty value (scan not finished) renders nothing.
+export function ScanSeverityTag({ value }: { value?: string }) {
+  if (!value) return null
+  if (value === "clean") {
+    return (
+      <span
+        className="inline-block rounded-md px-2 py-0.5 text-xs font-semibold"
+        style={{ color: "#86efac", background: "rgba(34,197,94,.10)", border: "1px solid #86efac33" }}
+      >
+        Clean
+      </span>
+    )
+  }
+  return <SeverityBadge severity={value as Severity} />
+}

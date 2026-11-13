@@ -55,6 +55,57 @@ func TestSQLite_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestSQLite_Triage(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	st.CreateProject(ctx, &model.Project{ID: "p1", Name: "P", CreatedAt: time.Now()})
+	st.CreateAsset(ctx, &model.Asset{ID: "a1", ProjectID: "p1", Type: model.AssetDomain, Name: "example.com", CreatedAt: time.Now()})
+
+	// Upsert a verdict.
+	if err := st.SetTriage(ctx, &model.Triage{AssetID: "a1", Fingerprint: "fp1", Status: model.TriageFalsePositive, Note: "benign", UpdatedAt: time.Now()}); err != nil {
+		t.Fatalf("set triage: %v", err)
+	}
+	got, err := st.ListTriage(ctx, "a1")
+	if err != nil || len(got) != 1 || got[0].Status != model.TriageFalsePositive || got[0].Note != "benign" {
+		t.Fatalf("list triage: %v / %+v", err, got)
+	}
+
+	// Update in place (same key) must not create a second row.
+	if err := st.SetTriage(ctx, &model.Triage{AssetID: "a1", Fingerprint: "fp1", Status: model.TriageAcceptedRisk, UpdatedAt: time.Now()}); err != nil {
+		t.Fatalf("update triage: %v", err)
+	}
+	got, _ = st.ListTriage(ctx, "a1")
+	if len(got) != 1 || got[0].Status != model.TriageAcceptedRisk {
+		t.Fatalf("expected 1 updated row, got %+v", got)
+	}
+
+	// StatusOpen deletes the record.
+	if err := st.SetTriage(ctx, &model.Triage{AssetID: "a1", Fingerprint: "fp1", Status: model.TriageOpen, UpdatedAt: time.Now()}); err != nil {
+		t.Fatalf("clear triage: %v", err)
+	}
+	got, _ = st.ListTriage(ctx, "a1")
+	if len(got) != 0 {
+		t.Fatalf("expected triage cleared, got %+v", got)
+	}
+
+	// Cascade: deleting the asset removes its triage.
+	st.SetTriage(ctx, &model.Triage{AssetID: "a1", Fingerprint: "fp2", Status: model.TriageFixed, UpdatedAt: time.Now()})
+	if err := st.DeleteAsset(ctx, "a1"); err != nil {
+		t.Fatalf("delete asset: %v", err)
+	}
+	got, _ = st.ListTriage(ctx, "a1")
+	if len(got) != 0 {
+		t.Fatalf("expected triage gone after asset delete, got %+v", got)
+	}
+}
+
 func TestSQLite_DeleteProjectCascade(t *testing.T) {
 	ctx := context.Background()
 	st, err := sqlite.Open(":memory:")

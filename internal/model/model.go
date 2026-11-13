@@ -2,7 +2,13 @@
 // scanners, store and report layers. No business logic lives here.
 package model
 
-import "time"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"strings"
+	"time"
+)
 
 // Severity is the normalized finding severity. Ordered constants allow
 // comparison and aggregation.
@@ -83,6 +89,10 @@ type Asset struct {
 	Type      AssetType `json:"type"`
 	Name      string    `json:"name"`
 	Scope     []string  `json:"scope"`
+	// Blacklist is a denylist of host patterns excluded from scans even when in
+	// scope. Each entry is either an exact host ("example.com") or a wildcard
+	// ("*.example.com", which also matches the base). Enforced in scope.Filter.
+	Blacklist []string  `json:"blacklist"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -115,6 +125,67 @@ type Finding struct {
 	Severity Severity       `json:"severity"`
 	Title    string         `json:"title"`
 	Evidence map[string]any `json:"evidence,omitempty"`
+}
+
+// Fingerprint returns a stable identifier for "the same finding" across scans.
+// It is derived from scanner + target(host:port) + title, so the same exposure
+// re-detected on a later scan hashes identically. This is the key that scan
+// diffing (new/resolved/unchanged) and triage (persisted status) hang on.
+//
+// Host falls back to Domain when empty (e.g. dns findings carry Domain only).
+// Title is lowercased and trimmed so cosmetic casing/spacing changes do not
+// fork the fingerprint. Port is included: the same host on a different port is
+// a distinct exposure and gets a distinct fingerprint. Fields are joined with a
+// NUL separator so values cannot run together into a collision.
+func (f Finding) Fingerprint() string {
+	host := f.Target.Host
+	if host == "" {
+		host = f.Target.Domain
+	}
+	target := fmt.Sprintf("%s:%d", strings.ToLower(host), f.Target.Port)
+	title := strings.ToLower(strings.TrimSpace(f.Title))
+	key := strings.Join([]string{strings.ToLower(f.Scanner), target, title}, "\x00")
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])
+}
+
+// TriageStatus is a human-assigned judgement on a finding. Aegis never sets it
+// automatically; it only persists what the operator decided so re-scans keep the
+// verdict. Absence of a record means StatusOpen.
+type TriageStatus string
+
+const (
+	TriageOpen          TriageStatus = "open"
+	TriageFalsePositive TriageStatus = "false-positive"
+	TriageAcceptedRisk  TriageStatus = "accepted-risk"
+	TriageFixed         TriageStatus = "fixed"
+)
+
+// ValidTriageStatus reports whether s is a known triage status.
+func ValidTriageStatus(s TriageStatus) bool {
+	switch s {
+	case TriageOpen, TriageFalsePositive, TriageAcceptedRisk, TriageFixed:
+		return true
+	}
+	return false
+}
+
+// SuppressesNew reports whether this status stops its finding from being flagged
+// NEW in a scan diff. false-positive and accepted-risk are already-judged, so
+// they stay quiet; fixed does not suppress, so a fixed finding that reappears
+// surfaces as NEW again (a regression).
+func (s TriageStatus) SuppressesNew() bool {
+	return s == TriageFalsePositive || s == TriageAcceptedRisk
+}
+
+// Triage is the persisted verdict for one finding on one asset, keyed by
+// asset_id + fingerprint so it survives re-scans.
+type Triage struct {
+	AssetID     string       `json:"asset_id"`
+	Fingerprint string       `json:"fingerprint"`
+	Status      TriageStatus `json:"status"`
+	Note        string       `json:"note,omitempty"`
+	UpdatedAt   time.Time    `json:"updated_at"`
 }
 
 // ScanResult aggregates everything produced by one scan run.

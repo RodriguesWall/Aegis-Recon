@@ -11,11 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RodriguesWall/aegis-recon/internal/diff"
 	"github.com/RodriguesWall/aegis-recon/internal/model"
 	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/queue"
 	"github.com/RodriguesWall/aegis-recon/internal/report"
 	"github.com/RodriguesWall/aegis-recon/internal/store"
+	"github.com/RodriguesWall/aegis-recon/internal/version"
 	"github.com/google/uuid"
 )
 
@@ -48,6 +50,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/scans/{id}", s.getScan)
 	mux.HandleFunc("GET /api/scans/{id}/progress", s.getProgress)
 	mux.HandleFunc("GET /api/scans/{id}/export", s.exportScan)
+	mux.HandleFunc("GET /api/scans/{id}/diff", s.diffScan)
+	mux.HandleFunc("PUT /api/assets/{id}/triage", s.setTriage)
 	mux.HandleFunc("DELETE /api/scans/{id}", s.deleteScan)
 	return cors(mux)
 }
@@ -58,6 +62,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service": "aegis-recon",
 		"status":  "ok",
+		"version": version.Version,
 		"queue":   s.queue.Stats(),
 		"time":    time.Now().UTC(),
 	})
@@ -185,9 +190,10 @@ func (s *Server) updateAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Name  string   `json:"name"`
-		Type  string   `json:"type"`
-		Scope []string `json:"scope"`
+		Name      string    `json:"name"`
+		Type      string    `json:"type"`
+		Scope     []string  `json:"scope"`
+		Blacklist *[]string `json:"blacklist"`
 	}
 	if !readJSON(w, r, &in) {
 		return
@@ -200,6 +206,11 @@ func (s *Server) updateAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(in.Scope) > 0 {
 		a.Scope = in.Scope
+	}
+	// Pointer so an explicit [] clears the blacklist, while omitting the field
+	// leaves it unchanged.
+	if in.Blacklist != nil {
+		a.Blacklist = cleanPatterns(*in.Blacklist)
 	}
 	if err := s.store.UpdateAsset(r.Context(), a); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -250,13 +261,38 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, scan)
 }
 
+// scanListDTO is a Scan plus the highest severity among its findings, so the
+// project list can show a severity tag per scan. "clean" means no findings.
+type scanListDTO struct {
+	model.Scan
+	TopSeverity string `json:"top_severity"`
+}
+
 func (s *Server) listScans(w http.ResponseWriter, r *http.Request) {
-	scans, err := s.store.ListScans(r.Context(), r.PathValue("id"))
+	assetID := r.PathValue("id")
+	scans, err := s.store.ListScans(r.Context(), assetID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, scans)
+	tops, err := s.store.TopSeverities(r.Context(), assetID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := make([]scanListDTO, len(scans))
+	for i, sc := range scans {
+		top := "clean"
+		if sev, ok := tops[sc.ID]; ok {
+			top = string(sev)
+		}
+		// A scan still running has no verdict yet.
+		if sc.Status != model.StatusCompleted {
+			top = ""
+		}
+		out[i] = scanListDTO{Scan: sc, TopSeverity: top}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) getScan(w http.ResponseWriter, r *http.Request) {
@@ -271,7 +307,142 @@ func (s *Server) getScan(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"scan": scan, "findings": findings})
+	// Attach the per-asset triage verdicts, keyed by fingerprint so the UI can
+	// show each finding's current status. Absent fingerprint = open.
+	triage, err := s.store.ListTriage(r.Context(), scan.AssetID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	tmap := make(map[string]model.Triage, len(triage))
+	for _, t := range triage {
+		tmap[t.Fingerprint] = t
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"scan": scan, "findings": withFingerprints(findings), "triage": tmap})
+}
+
+// findingDTO is a Finding plus its fingerprint, so the client can look each one
+// up in the triage map without recomputing the hash itself.
+type findingDTO struct {
+	model.Finding
+	Fingerprint string `json:"fingerprint"`
+}
+
+func withFingerprints(fs []model.Finding) []findingDTO {
+	out := make([]findingDTO, len(fs))
+	for i, f := range fs {
+		out[i] = findingDTO{Finding: f, Fingerprint: f.Fingerprint()}
+	}
+	return out
+}
+
+// setTriage upserts the operator's verdict for one finding on an asset. Body:
+// {fingerprint, status, note}. status "open" clears the record.
+func (s *Server) setTriage(w http.ResponseWriter, r *http.Request) {
+	assetID := r.PathValue("id")
+	if _, err := s.store.GetAsset(r.Context(), assetID); err != nil {
+		writeErr(w, http.StatusNotFound, "asset not found")
+		return
+	}
+	var in struct {
+		Fingerprint string `json:"fingerprint"`
+		Status      string `json:"status"`
+		Note        string `json:"note"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if strings.TrimSpace(in.Fingerprint) == "" {
+		writeErr(w, http.StatusBadRequest, "fingerprint required")
+		return
+	}
+	status := model.TriageStatus(in.Status)
+	if !model.ValidTriageStatus(status) {
+		writeErr(w, http.StatusBadRequest, "invalid status (open|false-positive|accepted-risk|fixed)")
+		return
+	}
+	t := &model.Triage{
+		AssetID:     assetID,
+		Fingerprint: in.Fingerprint,
+		Status:      status,
+		Note:        strings.TrimSpace(in.Note),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	if err := s.store.SetTriage(r.Context(), t); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+// diffScan compares a scan against the previous COMPLETED scan of the same
+// asset, matching findings by fingerprint. The response carries the counts
+// (new/resolved/unchanged), the two scan ids, and the classified findings. When
+// there is no earlier completed scan, previous_scan_id is empty and every
+// current finding is reported as new.
+func (s *Server) diffScan(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	curr, err := s.store.GetScan(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "scan not found")
+		return
+	}
+	currFindings, err := s.store.ListFindings(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Scans come back newest-first. The previous scan is the first COMPLETED one
+	// created strictly before this scan.
+	scans, err := s.store.ListScans(r.Context(), curr.AssetID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var prevID string
+	for _, sc := range scans {
+		if sc.ID == id || sc.Status != model.StatusCompleted {
+			continue
+		}
+		if sc.CreatedAt.Before(curr.CreatedAt) {
+			prevID = sc.ID
+			break
+		}
+	}
+
+	var prevFindings []model.Finding
+	if prevID != "" {
+		prevFindings, err = s.store.ListFindings(r.Context(), prevID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	// Suppress NEW for findings the operator already judged (false-positive /
+	// accepted-risk), so a known finding never resurfaces as new.
+	triage, err := s.store.ListTriage(r.Context(), curr.AssetID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	suppressed := make(map[string]bool, len(triage))
+	for _, t := range triage {
+		if t.Status.SuppressesNew() {
+			suppressed[t.Fingerprint] = true
+		}
+	}
+
+	result := diff.Scans(currFindings, prevFindings).SuppressNew(suppressed)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"current_scan_id":  id,
+		"previous_scan_id": prevID,
+		"counts":           result.Counts(),
+		"new":              result.New,
+		"resolved":         result.Resolved,
+		"unchanged":        result.Unchanged,
+	})
 }
 
 // exportScan returns the scan's findings as a downloadable file. ?format=sarif
@@ -334,6 +505,22 @@ func (s *Server) deleteScan(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---- helpers ----
+
+// cleanPatterns trims, lowercases, drops blanks and de-duplicates blacklist
+// entries so the stored list is tidy. Order is preserved.
+func cleanPatterns(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	return out
+}
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
