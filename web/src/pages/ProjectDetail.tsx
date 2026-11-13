@@ -6,6 +6,8 @@ import { ConfirmDialog } from "../components/ConfirmDialog"
 import { StatusPill } from "../components/StatusPill"
 import type { Asset, Scan } from "../types"
 
+const POLL_MS = 2000
+
 export function ProjectDetail() {
   const { id = "" } = useParams()
   const [assets, setAssets] = useState<Asset[]>([])
@@ -31,6 +33,19 @@ export function ProjectDetail() {
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  // Scans run server-side in the background. While any is still PENDING or
+  // PROCESSING, refresh the list so its status updates on its own — without this
+  // the list freezes at the status it had when the page mounted (see Notes #17).
+  const hasActive = Object.values(scansByAsset).some((list) =>
+    list.some((s) => s.status === "PENDING" || s.status === "PROCESSING"),
+  )
+  useEffect(() => {
+    if (!hasActive) return
+    const t = setInterval(() => void load(), POLL_MS)
+    return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasActive])
 
   async function addAsset(e: React.FormEvent) {
     e.preventDefault()
