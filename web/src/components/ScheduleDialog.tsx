@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { createPortal } from "react-dom"
 import { api } from "../api/client"
 
 const PRESETS: { label: string; hours: number }[] = [
@@ -50,7 +51,10 @@ export function ScheduleDialog({
     }
   }
 
-  return (
+  // Portal to body: a .glass-card ancestor has backdrop-filter, which makes it
+  // the containing block for position:fixed descendants. Rendered inline, the
+  // overlay would be trapped inside the card instead of covering the viewport.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       onClick={onClose}
@@ -127,6 +131,7 @@ export function ScheduleDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
