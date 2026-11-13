@@ -12,14 +12,59 @@ import (
 )
 
 // Scope is the allowlist for one engagement: the root domain and its
-// subdomains.
+// subdomains. An optional denylist subtracts specific hosts that must never be
+// probed even when they are in scope.
 type Scope struct {
 	root string
+	deny []denyRule
+}
+
+// denyRule is one parsed blacklist entry. wildcard means the pattern was
+// "*.base" and matches the base plus any subdomain of it; otherwise it matches
+// the host exactly.
+type denyRule struct {
+	base     string
+	wildcard bool
 }
 
 // New builds a scope for a root domain (case/space normalized).
 func New(domain string) *Scope {
 	return &Scope{root: normalize(domain)}
+}
+
+// Deny adds blacklist patterns to the scope and returns it (chainable). Each
+// pattern is either an exact host ("example.com") or a wildcard ("*.example.com"
+// — matches example.com and every subdomain). Empty/blank patterns are ignored.
+func (s *Scope) Deny(patterns []string) *Scope {
+	for _, p := range patterns {
+		raw := strings.ToLower(strings.TrimSpace(p))
+		if raw == "" {
+			continue
+		}
+		if strings.HasPrefix(raw, "*.") {
+			if base := normalize(raw); base != "" {
+				s.deny = append(s.deny, denyRule{base: base, wildcard: true})
+			}
+			continue
+		}
+		if base := normalize(raw); base != "" {
+			s.deny = append(s.deny, denyRule{base: base})
+		}
+	}
+	return s
+}
+
+// denied reports whether host matches any blacklist rule.
+func (s *Scope) denied(host string) bool {
+	for _, d := range s.deny {
+		if host == d.base {
+			return true
+		}
+		if d.wildcard && strings.HasSuffix(host, "."+d.base) {
+			return true
+		}
+	}
+	return false
 }
 
 // InScope reports whether host is the root domain or a subdomain of it.
@@ -38,7 +83,7 @@ func (s *Scope) Filter(hosts []string) []string {
 	out := make([]string, 0, len(hosts))
 	for _, h := range hosts {
 		n := normalize(h)
-		if n == "" || seen[n] || !s.InScope(n) {
+		if n == "" || seen[n] || !s.InScope(n) || s.denied(n) {
 			continue
 		}
 		seen[n] = true

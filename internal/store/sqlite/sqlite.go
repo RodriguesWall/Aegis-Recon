@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS assets (
 	type       TEXT NOT NULL,
 	name       TEXT NOT NULL,
 	scope      TEXT NOT NULL,
+	blacklist  TEXT NOT NULL DEFAULT '',
 	created_at TIMESTAMP NOT NULL
 );
 CREATE TABLE IF NOT EXISTS scans (
@@ -106,6 +107,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 		`ALTER TABLE scans ADD COLUMN include_info INTEGER NOT NULL DEFAULT 0`)
 	// Same best-effort add for the finding fingerprint (scan diffing + triage).
 	// Run before the index so databases predating the column still migrate.
+	// Per-asset scan blacklist (Notes #18).
+	_, _ = s.db.ExecContext(ctx,
+		`ALTER TABLE assets ADD COLUMN blacklist TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.ExecContext(ctx,
 		`ALTER TABLE findings ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.ExecContext(ctx,
@@ -161,8 +165,8 @@ func (s *Store) CreateAsset(ctx context.Context, a *model.Asset) error {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO assets (id, project_id, type, name, scope, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		a.ID, a.ProjectID, a.Type, a.Name, strings.Join(a.Scope, ","), a.CreatedAt)
+		`INSERT INTO assets (id, project_id, type, name, scope, blacklist, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, a.ProjectID, a.Type, a.Name, strings.Join(a.Scope, ","), strings.Join(a.Blacklist, ","), a.CreatedAt)
 	return err
 }
 
@@ -228,14 +232,17 @@ func (s *Store) DeleteAsset(ctx context.Context, id string) error {
 
 func (s *Store) GetAsset(ctx context.Context, id string) (*model.Asset, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, project_id, type, name, scope, created_at FROM assets WHERE id = ?`, id)
+		`SELECT id, project_id, type, name, scope, blacklist, created_at FROM assets WHERE id = ?`, id)
 	var a model.Asset
-	var scope string
-	if err := row.Scan(&a.ID, &a.ProjectID, &a.Type, &a.Name, &scope, &a.CreatedAt); err != nil {
+	var scope, blacklist string
+	if err := row.Scan(&a.ID, &a.ProjectID, &a.Type, &a.Name, &scope, &blacklist, &a.CreatedAt); err != nil {
 		return nil, err
 	}
 	if scope != "" {
 		a.Scope = strings.Split(scope, ",")
+	}
+	if blacklist != "" {
+		a.Blacklist = strings.Split(blacklist, ",")
 	}
 	return &a, nil
 }
@@ -244,14 +251,14 @@ func (s *Store) UpdateAsset(ctx context.Context, a *model.Asset) error {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE assets SET name = ?, type = ?, scope = ? WHERE id = ?`,
-		a.Name, a.Type, strings.Join(a.Scope, ","), a.ID)
+		`UPDATE assets SET name = ?, type = ?, scope = ?, blacklist = ? WHERE id = ?`,
+		a.Name, a.Type, strings.Join(a.Scope, ","), strings.Join(a.Blacklist, ","), a.ID)
 	return err
 }
 
 func (s *Store) ListAssets(ctx context.Context, projectID string) ([]model.Asset, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, project_id, type, name, scope, created_at FROM assets WHERE project_id = ? ORDER BY created_at DESC`,
+		`SELECT id, project_id, type, name, scope, blacklist, created_at FROM assets WHERE project_id = ? ORDER BY created_at DESC`,
 		projectID)
 	if err != nil {
 		return nil, err
@@ -260,12 +267,15 @@ func (s *Store) ListAssets(ctx context.Context, projectID string) ([]model.Asset
 	var out []model.Asset
 	for rows.Next() {
 		var a model.Asset
-		var scope string
-		if err := rows.Scan(&a.ID, &a.ProjectID, &a.Type, &a.Name, &scope, &a.CreatedAt); err != nil {
+		var scope, blacklist string
+		if err := rows.Scan(&a.ID, &a.ProjectID, &a.Type, &a.Name, &scope, &blacklist, &a.CreatedAt); err != nil {
 			return nil, err
 		}
 		if scope != "" {
 			a.Scope = strings.Split(scope, ",")
+		}
+		if blacklist != "" {
+			a.Blacklist = strings.Split(blacklist, ",")
 		}
 		out = append(out, a)
 	}

@@ -16,6 +16,7 @@ export interface Asset {
   type: string
   name: string
   scope: string[]
+  blacklist: string[]
   created_at: string
 }
 

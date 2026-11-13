@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { api } from "../api/client"
+import { BlacklistDialog } from "../components/BlacklistDialog"
 import { CardMenu } from "../components/CardMenu"
 import { ConfirmDialog } from "../components/ConfirmDialog"
 import { StatusPill } from "../components/StatusPill"
@@ -111,6 +112,7 @@ function AssetCard({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(asset.name)
   const [confirm, setConfirm] = useState(false)
+  const [blacklistOpen, setBlacklistOpen] = useState(false)
   const [scanToDelete, setScanToDelete] = useState<string | null>(null)
   const [includeInfo, setIncludeInfo] = useState(false)
 
@@ -164,6 +166,10 @@ function AssetCard({
         <CardMenu
           items={[
             { label: "Edit", onClick: () => setEditing(true) },
+            {
+              label: `Blacklist${asset.blacklist?.length ? ` (${asset.blacklist.length})` : ""}`,
+              onClick: () => setBlacklistOpen(true),
+            },
             { label: "Delete", danger: true, onClick: () => setConfirm(true) },
           ]}
         />
@@ -211,6 +217,19 @@ function AssetCard({
             ))}
           </div>
         </div>
+      )}
+
+      {blacklistOpen && (
+        <BlacklistDialog
+          assetName={asset.name}
+          initial={asset.blacklist ?? []}
+          onCancel={() => setBlacklistOpen(false)}
+          onSave={async (patterns) => {
+            await api.setAssetBlacklist(asset.id, patterns)
+            setBlacklistOpen(false)
+            onChanged()
+          }}
+        />
       )}
 
       {confirm && (

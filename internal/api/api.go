@@ -189,9 +189,10 @@ func (s *Server) updateAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Name  string   `json:"name"`
-		Type  string   `json:"type"`
-		Scope []string `json:"scope"`
+		Name      string    `json:"name"`
+		Type      string    `json:"type"`
+		Scope     []string  `json:"scope"`
+		Blacklist *[]string `json:"blacklist"`
 	}
 	if !readJSON(w, r, &in) {
 		return
@@ -204,6 +205,11 @@ func (s *Server) updateAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(in.Scope) > 0 {
 		a.Scope = in.Scope
+	}
+	// Pointer so an explicit [] clears the blacklist, while omitting the field
+	// leaves it unchanged.
+	if in.Blacklist != nil {
+		a.Blacklist = cleanPatterns(*in.Blacklist)
 	}
 	if err := s.store.UpdateAsset(r.Context(), a); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -394,6 +400,22 @@ func (s *Server) deleteScan(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---- helpers ----
+
+// cleanPatterns trims, lowercases, drops blanks and de-duplicates blacklist
+// entries so the stored list is tidy. Order is preserved.
+func cleanPatterns(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	return out
+}
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")

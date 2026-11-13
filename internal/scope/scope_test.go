@@ -55,6 +55,36 @@ func TestFilter_DedupAndScope(t *testing.T) {
 	}
 }
 
+func TestFilter_Denylist(t *testing.T) {
+	s := scope.New("example.com").Deny([]string{"www.example.com", "*.admin.example.com", "  "})
+	in := []string{
+		"example.com",          // in scope, not denied -> kept
+		"www.example.com",      // exact deny -> dropped
+		"admin.example.com",    // wildcard base -> dropped
+		"x.admin.example.com",  // wildcard sub -> dropped
+		"api.example.com",      // kept
+		"adminxexample.com",    // not a subdomain of admin.example.com (off-scope anyway)
+	}
+	out := s.Filter(in)
+	got := map[string]bool{}
+	for _, h := range out {
+		got[h] = true
+	}
+	for _, denied := range []string{"www.example.com", "admin.example.com", "x.admin.example.com"} {
+		if got[denied] {
+			t.Errorf("denied host %q passed the filter: %v", denied, out)
+		}
+	}
+	for _, want := range []string{"example.com", "api.example.com"} {
+		if !got[want] {
+			t.Errorf("expected %q to be kept, got %v", want, out)
+		}
+	}
+	if len(out) != 2 {
+		t.Errorf("expected 2 hosts after denylist, got %v", out)
+	}
+}
+
 func TestRateLimiter(t *testing.T) {
 	r := scope.NewRateLimiter(50 * time.Millisecond)
 	start := time.Now()

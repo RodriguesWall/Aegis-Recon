@@ -89,6 +89,10 @@ type Asset struct {
 	Type      AssetType `json:"type"`
 	Name      string    `json:"name"`
 	Scope     []string  `json:"scope"`
+	// Blacklist is a denylist of host patterns excluded from scans even when in
+	// scope. Each entry is either an exact host ("example.com") or a wildcard
+	// ("*.example.com", which also matches the base). Enforced in scope.Filter.
+	Blacklist []string  `json:"blacklist"`
 	CreatedAt time.Time `json:"created_at"`
 }
 

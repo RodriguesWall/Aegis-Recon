@@ -39,6 +39,8 @@ export const api = {
     }),
   updateAsset: (id: string, name: string) =>
     req<Asset>(`/assets/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
+  setAssetBlacklist: (id: string, blacklist: string[]) =>
+    req<Asset>(`/assets/${id}`, { method: "PATCH", body: JSON.stringify({ blacklist }) }),
   deleteAsset: (id: string) => req<void>(`/assets/${id}`, { method: "DELETE" }),
 
   listScans: (assetID: string) => req<Scan[]>(`/assets/${assetID}/scans`),
