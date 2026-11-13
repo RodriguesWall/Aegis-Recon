@@ -21,6 +21,7 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/queue"
 	"github.com/RodriguesWall/aegis-recon/internal/scansvc"
+	"github.com/RodriguesWall/aegis-recon/internal/scheduler"
 	"github.com/RodriguesWall/aegis-recon/internal/store/sqlite"
 	"github.com/RodriguesWall/aegis-recon/internal/version"
 )
@@ -70,6 +71,9 @@ func main() {
 	svc := scansvc.New(st, tracker, logger)
 	q := queue.New(svc.Run, queue.WithWorkers(2), queue.WithLogger(logger))
 	q.Start(ctx)
+
+	// Scheduler: enqueues scheduled scans at each asset's interval. Stops on ctx.
+	go scheduler.New(st, q, logger).Run(ctx)
 
 	// Crash recovery. Scans left PROCESSING (crash mid-run) are reset to PENDING
 	// first, then every PENDING scan is re-enqueued.

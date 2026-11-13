@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/RodriguesWall/aegis-recon/internal/model"
 )
@@ -50,6 +51,15 @@ type Store interface {
 	SetTriage(ctx context.Context, t *model.Triage) error
 	// ListTriage returns all triage records for an asset.
 	ListTriage(ctx context.Context, assetID string) ([]model.Triage, error)
+
+	// SetSchedule upserts the automatic-scan schedule for an asset.
+	SetSchedule(ctx context.Context, sc *model.Schedule) error
+	// GetSchedule returns an asset's schedule, or a not-found error if none.
+	GetSchedule(ctx context.Context, assetID string) (*model.Schedule, error)
+	// ListDueSchedules returns enabled schedules whose NextRun is at or before now.
+	ListDueSchedules(ctx context.Context, now time.Time) ([]model.Schedule, error)
+	// HasActiveScan reports whether the asset has a PENDING or PROCESSING scan.
+	HasActiveScan(ctx context.Context, assetID string) (bool, error)
 
 	Close() error
 }

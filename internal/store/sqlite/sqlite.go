@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/RodriguesWall/aegis-recon/internal/model"
 	"github.com/RodriguesWall/aegis-recon/internal/store"
@@ -99,6 +100,13 @@ CREATE TABLE IF NOT EXISTS triage (
 	note        TEXT NOT NULL DEFAULT '',
 	updated_at  TIMESTAMP NOT NULL,
 	PRIMARY KEY (asset_id, fingerprint)
+);
+CREATE TABLE IF NOT EXISTS schedules (
+	asset_id         TEXT PRIMARY KEY REFERENCES assets(id),
+	interval_minutes INTEGER NOT NULL,
+	next_run         TIMESTAMP NOT NULL,
+	enabled          INTEGER NOT NULL DEFAULT 0,
+	updated_at       TIMESTAMP NOT NULL
 );
 `
 
@@ -205,6 +213,7 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 			SELECT s.id FROM scans s JOIN assets a ON s.asset_id = a.id WHERE a.project_id = ?)`, []any{id}},
 		{`DELETE FROM scans WHERE asset_id IN (SELECT id FROM assets WHERE project_id = ?)`, []any{id}},
 		{`DELETE FROM triage WHERE asset_id IN (SELECT id FROM assets WHERE project_id = ?)`, []any{id}},
+		{`DELETE FROM schedules WHERE asset_id IN (SELECT id FROM assets WHERE project_id = ?)`, []any{id}},
 		{`DELETE FROM assets WHERE project_id = ?`, []any{id}},
 		{`DELETE FROM projects WHERE id = ?`, []any{id}},
 	}
@@ -230,6 +239,7 @@ func (s *Store) DeleteAsset(ctx context.Context, id string) error {
 		`DELETE FROM findings WHERE scan_id IN (SELECT id FROM scans WHERE asset_id = ?)`,
 		`DELETE FROM scans WHERE asset_id = ?`,
 		`DELETE FROM triage WHERE asset_id = ?`,
+		`DELETE FROM schedules WHERE asset_id = ?`,
 		`DELETE FROM assets WHERE id = ?`,
 	}
 	for _, q := range stmts {
@@ -429,6 +439,66 @@ func (s *Store) ListFindings(ctx context.Context, scanID string) ([]model.Findin
 		out = append(out, f)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) SetSchedule(ctx context.Context, sc *model.Schedule) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO schedules (asset_id, interval_minutes, next_run, enabled, updated_at)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(asset_id)
+		 DO UPDATE SET interval_minutes = excluded.interval_minutes, next_run = excluded.next_run,
+		               enabled = excluded.enabled, updated_at = excluded.updated_at`,
+		sc.AssetID, sc.IntervalMinutes, sc.NextRun, boolToInt(sc.Enabled), sc.UpdatedAt)
+	return err
+}
+
+func (s *Store) GetSchedule(ctx context.Context, assetID string) (*model.Schedule, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT asset_id, interval_minutes, next_run, enabled, updated_at FROM schedules WHERE asset_id = ?`, assetID)
+	var sc model.Schedule
+	var enabled int
+	if err := row.Scan(&sc.AssetID, &sc.IntervalMinutes, &sc.NextRun, &enabled, &sc.UpdatedAt); err != nil {
+		return nil, err
+	}
+	sc.Enabled = enabled != 0
+	return &sc, nil
+}
+
+func (s *Store) ListDueSchedules(ctx context.Context, now time.Time) ([]model.Schedule, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT asset_id, interval_minutes, next_run, enabled, updated_at
+		 FROM schedules WHERE enabled = 1 AND next_run <= ?`, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.Schedule
+	for rows.Next() {
+		var sc model.Schedule
+		var enabled int
+		if err := rows.Scan(&sc.AssetID, &sc.IntervalMinutes, &sc.NextRun, &enabled, &sc.UpdatedAt); err != nil {
+			return nil, err
+		}
+		sc.Enabled = enabled != 0
+		out = append(out, sc)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) HasActiveScan(ctx context.Context, assetID string) (bool, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT 1 FROM scans WHERE asset_id = ? AND status IN ('PENDING','PROCESSING') LIMIT 1`, assetID)
+	var one int
+	switch err := row.Scan(&one); err {
+	case nil:
+		return true, nil
+	case sql.ErrNoRows:
+		return false, nil
+	default:
+		return false, err
+	}
 }
 
 // TopSeverities returns, for each scan of the asset that has findings, the

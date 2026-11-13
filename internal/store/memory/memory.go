@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/RodriguesWall/aegis-recon/internal/model"
 	"github.com/RodriguesWall/aegis-recon/internal/store"
@@ -23,6 +24,8 @@ type Store struct {
 	findings map[string][]model.Finding
 	// triage is keyed by asset_id + "\x00" + fingerprint.
 	triage map[string]model.Triage
+	// schedules keyed by asset_id.
+	schedules map[string]model.Schedule
 }
 
 // New returns an empty in-memory store.
@@ -31,8 +34,9 @@ func New() *Store {
 		projects: map[string]model.Project{},
 		assets:   map[string]model.Asset{},
 		scans:    map[string]model.Scan{},
-		findings: map[string][]model.Finding{},
-		triage:   map[string]model.Triage{},
+		findings:  map[string][]model.Finding{},
+		triage:    map[string]model.Triage{},
+		schedules: map[string]model.Schedule{},
 	}
 }
 
@@ -120,6 +124,7 @@ func (s *Store) deleteAssetLocked(id string) {
 			delete(s.triage, k)
 		}
 	}
+	delete(s.schedules, id)
 	delete(s.assets, id)
 }
 
@@ -280,6 +285,46 @@ func (s *Store) ListTriage(_ context.Context, assetID string) ([]model.Triage, e
 		}
 	}
 	return out, nil
+}
+
+func (s *Store) SetSchedule(_ context.Context, sc *model.Schedule) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.schedules[sc.AssetID] = *sc
+	return nil
+}
+
+func (s *Store) GetSchedule(_ context.Context, assetID string) (*model.Schedule, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sc, ok := s.schedules[assetID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return &sc, nil
+}
+
+func (s *Store) ListDueSchedules(_ context.Context, now time.Time) ([]model.Schedule, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []model.Schedule
+	for _, sc := range s.schedules {
+		if sc.Enabled && !sc.NextRun.After(now) {
+			out = append(out, sc)
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) HasActiveScan(_ context.Context, assetID string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, sc := range s.scans {
+		if sc.AssetID == assetID && (sc.Status == model.StatusPending || sc.Status == model.StatusProcessing) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // compile-time check.

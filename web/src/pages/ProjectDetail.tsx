@@ -4,6 +4,7 @@ import { api } from "../api/client"
 import { BlacklistDialog } from "../components/BlacklistDialog"
 import { CardMenu } from "../components/CardMenu"
 import { ConfirmDialog } from "../components/ConfirmDialog"
+import { ScheduleDialog } from "../components/ScheduleDialog"
 import { ScanSeverityTag } from "../components/SeverityBadge"
 import { StatusPill } from "../components/StatusPill"
 import type { Asset, Scan } from "../types"
@@ -114,6 +115,7 @@ function AssetCard({
   const [draft, setDraft] = useState(asset.name)
   const [confirm, setConfirm] = useState(false)
   const [blacklistOpen, setBlacklistOpen] = useState(false)
+  const [scheduleOpen, setScheduleOpen] = useState(false)
   const [scanToDelete, setScanToDelete] = useState<string | null>(null)
   const [includeInfo, setIncludeInfo] = useState(false)
 
@@ -171,6 +173,7 @@ function AssetCard({
               label: `Blacklist${asset.blacklist?.length ? ` (${asset.blacklist.length})` : ""}`,
               onClick: () => setBlacklistOpen(true),
             },
+            { label: "Schedule", onClick: () => setScheduleOpen(true) },
             { label: "Delete", danger: true, onClick: () => setConfirm(true) },
           ]}
         />
@@ -231,6 +234,15 @@ function AssetCard({
             setBlacklistOpen(false)
             onChanged()
           }}
+        />
+      )}
+
+      {scheduleOpen && (
+        <ScheduleDialog
+          assetName={asset.name}
+          assetID={asset.id}
+          onClose={() => setScheduleOpen(false)}
+          onSaved={onChanged}
         />
       )}
 
