@@ -98,6 +98,20 @@ export interface Stats {
   trend: TrendPoint[]
 }
 
+export interface FindingRow {
+  project_id: string
+  project_name: string
+  asset_id: string
+  asset_name: string
+  scanner: string
+  severity: Severity
+  title: string
+  host: string
+  port: number
+  fingerprint: string
+  status: string
+}
+
 export interface SettingsData {
   settings: Record<string, string>
   secrets_set: Record<string, boolean>

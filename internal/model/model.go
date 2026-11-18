@@ -191,11 +191,18 @@ func (s TriageStatus) SuppressesNew() bool {
 }
 
 // CurrentFinding is a finding from the latest completed scan of its asset,
-// tagged with its project. Used to build the aggregate dashboard snapshot.
+// tagged with its project. Used for the aggregate dashboard snapshot and the
+// global findings view.
 type CurrentFinding struct {
 	ProjectID   string
+	ProjectName string
 	AssetID     string
+	AssetName   string
+	Scanner     string
 	Severity    Severity
+	Title       string
+	Host        string
+	Port        int
 	Fingerprint string
 }
 

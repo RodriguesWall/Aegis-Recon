@@ -27,6 +27,9 @@ export function Layout() {
           <Link to="/" className="text-sm text-muted hover:text-white">
             Projects
           </Link>
+          <Link to="/findings" className="text-sm text-muted hover:text-white">
+            Findings
+          </Link>
           <Link to="/settings" className="text-sm text-muted hover:text-white">
             Settings
           </Link>

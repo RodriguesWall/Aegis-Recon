@@ -1,5 +1,6 @@
 import type {
   Asset,
+  FindingRow,
   Progress,
   Project,
   Scan,
@@ -42,6 +43,15 @@ export const api = {
     if (assetID) q.set("asset", assetID)
     const qs = q.toString()
     return req<Stats>("/stats" + (qs ? "?" + qs : ""))
+  },
+  listFindings: (f: { project?: string; severity?: string; status?: string; q?: string }) => {
+    const p = new URLSearchParams()
+    if (f.project) p.set("project", f.project)
+    if (f.severity) p.set("severity", f.severity)
+    if (f.status) p.set("status", f.status)
+    if (f.q) p.set("q", f.q)
+    const qs = p.toString()
+    return req<FindingRow[]>("/findings" + (qs ? "?" + qs : ""))
   },
   getSettings: () => req<SettingsData>("/settings"),
   updateSettings: (body: Record<string, string>) =>

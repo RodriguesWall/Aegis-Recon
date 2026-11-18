@@ -40,6 +40,7 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /api/stats", s.stats)
+	mux.HandleFunc("GET /api/findings", s.findings)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	mux.HandleFunc("POST /api/projects", s.createProject)
@@ -732,6 +733,90 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 		"breakdown":    breakdown,
 		"trend":        trend,
 	})
+}
+
+// findingRow is a current finding enriched for the global findings view.
+type findingRow struct {
+	ProjectID   string         `json:"project_id"`
+	ProjectName string         `json:"project_name"`
+	AssetID     string         `json:"asset_id"`
+	AssetName   string         `json:"asset_name"`
+	Scanner     string         `json:"scanner"`
+	Severity    model.Severity `json:"severity"`
+	Title       string         `json:"title"`
+	Host        string         `json:"host"`
+	Port        int            `json:"port"`
+	Fingerprint string         `json:"fingerprint"`
+	Status      string         `json:"status"`
+}
+
+// findings is the global, filterable list of current findings (latest completed
+// scan per asset). Query params: project, asset, severity, scanner, status, q.
+func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	cur, err := s.store.CurrentFindings(ctx)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	triage, err := s.store.ListAllTriage(ctx)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	tri := make(map[string]model.TriageStatus, len(triage))
+	for _, t := range triage {
+		tri[t.AssetID+"\x00"+t.Fingerprint] = t.Status
+	}
+
+	q := r.URL.Query()
+	fProject := q.Get("project")
+	fAsset := q.Get("asset")
+	fSeverity := q.Get("severity")
+	fScanner := q.Get("scanner")
+	fStatus := q.Get("status")
+	fText := strings.ToLower(strings.TrimSpace(q.Get("q")))
+
+	out := make([]findingRow, 0, len(cur))
+	for _, cf := range cur {
+		status := string(model.TriageOpen)
+		if st, ok := tri[cf.AssetID+"\x00"+cf.Fingerprint]; ok {
+			status = string(st)
+		}
+		if fProject != "" && cf.ProjectID != fProject {
+			continue
+		}
+		if fAsset != "" && cf.AssetID != fAsset {
+			continue
+		}
+		if fSeverity != "" && string(cf.Severity) != fSeverity {
+			continue
+		}
+		if fScanner != "" && cf.Scanner != fScanner {
+			continue
+		}
+		if fStatus != "" && status != fStatus {
+			continue
+		}
+		if fText != "" && !strings.Contains(strings.ToLower(cf.Title), fText) &&
+			!strings.Contains(strings.ToLower(cf.Host), fText) {
+			continue
+		}
+		out = append(out, findingRow{
+			ProjectID: cf.ProjectID, ProjectName: cf.ProjectName,
+			AssetID: cf.AssetID, AssetName: cf.AssetName,
+			Scanner: cf.Scanner, Severity: cf.Severity, Title: cf.Title,
+			Host: cf.Host, Port: cf.Port, Fingerprint: cf.Fingerprint, Status: status,
+		})
+	}
+	// Severity desc, then title.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Severity.Rank() != out[j].Severity.Rank() {
+			return out[i].Severity.Rank() > out[j].Severity.Rank()
+		}
+		return out[i].Title < out[j].Title
+	})
+	writeJSON(w, http.StatusOK, out)
 }
 
 // secretSettings holds the setting keys whose values are encrypted at rest and

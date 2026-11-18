@@ -302,6 +302,52 @@ type sevStub struct {
 	Critical, High, Medium, Low, Info, Total int
 }
 
+func TestFindingsList(t *testing.T) {
+	st := memory.New()
+	q := queue.New(func(context.Context, string) error { return nil })
+	h := api.New(st, q, progress.New()).Routes()
+	ctx := context.Background()
+	st.CreateProject(ctx, &model.Project{ID: "p1", Name: "Acme"})
+	st.CreateAsset(ctx, &model.Asset{ID: "a1", ProjectID: "p1", Name: "acme.example", Type: model.AssetDomain})
+	st.CreateScan(ctx, &model.Scan{ID: "s1", AssetID: "a1", Type: model.ScanSurface, Status: model.StatusCompleted, CreatedAt: time.Unix(10, 0)})
+	fs := []model.Finding{
+		{Scanner: "httpprobe", Target: model.Target{Host: "acme.example", Port: 443}, Severity: model.SeverityCritical, Title: "admin exposed"},
+		{Scanner: "port", Target: model.Target{Host: "acme.example", Port: 3306}, Severity: model.SeverityHigh, Title: "mysql open"},
+	}
+	st.SaveFindings(ctx, "s1", fs)
+	st.SetTriage(ctx, &model.Triage{AssetID: "a1", Fingerprint: fs[1].Fingerprint(), Status: model.TriageFalsePositive})
+
+	decode := func(body []byte) []map[string]any {
+		var v []map[string]any
+		if err := json.Unmarshal(body, &v); err != nil {
+			t.Fatalf("decode: %v\n%s", err, body)
+		}
+		return v
+	}
+
+	// All: 2 findings, enriched + status.
+	all := decode(do(t, h, "GET", "/api/findings", "").Body.Bytes())
+	if len(all) != 2 {
+		t.Fatalf("want 2 findings, got %d", len(all))
+	}
+	if all[0]["severity"] != "critical" || all[0]["project_name"] != "Acme" || all[0]["asset_name"] != "acme.example" {
+		t.Fatalf("enrichment/order wrong: %+v", all[0])
+	}
+
+	// Filter by severity.
+	if got := decode(do(t, h, "GET", "/api/findings?severity=high", "").Body.Bytes()); len(got) != 1 || got[0]["title"] != "mysql open" {
+		t.Fatalf("severity filter wrong: %+v", got)
+	}
+	// Filter by status (false-positive -> the mysql finding).
+	if got := decode(do(t, h, "GET", "/api/findings?status=false-positive", "").Body.Bytes()); len(got) != 1 || got[0]["scanner"] != "port" {
+		t.Fatalf("status filter wrong: %+v", got)
+	}
+	// Text search on title.
+	if got := decode(do(t, h, "GET", "/api/findings?q=admin", "").Body.Bytes()); len(got) != 1 || got[0]["title"] != "admin exposed" {
+		t.Fatalf("q filter wrong: %+v", got)
+	}
+}
+
 func TestSettings(t *testing.T) {
 	st := memory.New()
 	q := queue.New(func(context.Context, string) error { return nil })

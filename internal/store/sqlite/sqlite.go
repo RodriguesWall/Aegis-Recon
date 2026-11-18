@@ -511,7 +511,7 @@ func (s *Store) ListDueSchedules(ctx context.Context, now time.Time) ([]model.Sc
 // CurrentFindings returns findings from the latest COMPLETED scan of each asset.
 func (s *Store) CurrentFindings(ctx context.Context) ([]model.CurrentFinding, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT a.project_id, ls.asset_id, f.severity, f.fingerprint
+		`SELECT a.project_id, p.name, ls.asset_id, a.name, f.scanner, f.severity, f.title, f.target, f.fingerprint
 		 FROM findings f
 		 JOIN (
 		   SELECT sc.id AS scan_id, sc.asset_id
@@ -522,7 +522,8 @@ func (s *Store) CurrentFindings(ctx context.Context) ([]model.CurrentFinding, er
 		   ) latest ON latest.asset_id = sc.asset_id AND latest.mx = sc.created_at
 		   WHERE sc.status = 'COMPLETED'
 		 ) ls ON ls.scan_id = f.scan_id
-		 JOIN assets a ON a.id = ls.asset_id`)
+		 JOIN assets a ON a.id = ls.asset_id
+		 JOIN projects p ON p.id = a.project_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -530,9 +531,18 @@ func (s *Store) CurrentFindings(ctx context.Context) ([]model.CurrentFinding, er
 	var out []model.CurrentFinding
 	for rows.Next() {
 		var cf model.CurrentFinding
-		if err := rows.Scan(&cf.ProjectID, &cf.AssetID, &cf.Severity, &cf.Fingerprint); err != nil {
+		var target string
+		if err := rows.Scan(&cf.ProjectID, &cf.ProjectName, &cf.AssetID, &cf.AssetName,
+			&cf.Scanner, &cf.Severity, &cf.Title, &target, &cf.Fingerprint); err != nil {
 			return nil, err
 		}
+		var t model.Target
+		_ = json.Unmarshal([]byte(target), &t)
+		cf.Host = t.Host
+		if cf.Host == "" {
+			cf.Host = t.Domain
+		}
+		cf.Port = t.Port
 		out = append(out, cf)
 	}
 	return out, rows.Err()

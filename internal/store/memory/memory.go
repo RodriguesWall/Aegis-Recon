@@ -351,10 +351,20 @@ func (s *Store) CurrentFindings(_ context.Context) ([]model.CurrentFinding, erro
 			continue
 		}
 		for _, f := range s.findings[sc.ID] {
+			host := f.Target.Host
+			if host == "" {
+				host = f.Target.Domain
+			}
 			out = append(out, model.CurrentFinding{
 				ProjectID:   a.ProjectID,
+				ProjectName: s.projects[a.ProjectID].Name,
 				AssetID:     assetID,
+				AssetName:   a.Name,
+				Scanner:     f.Scanner,
 				Severity:    f.Severity,
+				Title:       f.Title,
+				Host:        host,
+				Port:        f.Target.Port,
 				Fingerprint: f.Fingerprint(),
 			})
 		}
