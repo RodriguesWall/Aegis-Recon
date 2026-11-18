@@ -19,6 +19,7 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/cdn"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/dns"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/emailposture"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/exposedfiles"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/fingerprint"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/httpprobe"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/nuclei"
@@ -58,6 +59,7 @@ func New(st store.Store, tracker *progress.Tracker, logger *slog.Logger) *Servic
 			httpprobe.New(),
 			fingerprint.New(),
 			cdn.New(resolver),
+			exposedfiles.New(),
 		},
 		discoverers:     []model.Discoverer{subdomain.New(resolver)},
 		nucleiBin:       envOr("AEGIS_NUCLEI_BIN", "nuclei"),
