@@ -5,6 +5,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 
@@ -325,6 +326,86 @@ func (s *Store) HasActiveScan(_ context.Context, assetID string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func (s *Store) CurrentFindings(_ context.Context) ([]model.CurrentFinding, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	// Latest COMPLETED scan id per asset.
+	latest := map[string]model.Scan{}
+	for _, sc := range s.scans {
+		if sc.Status != model.StatusCompleted {
+			continue
+		}
+		if cur, ok := latest[sc.AssetID]; !ok || sc.CreatedAt.After(cur.CreatedAt) {
+			latest[sc.AssetID] = sc
+		}
+	}
+	var out []model.CurrentFinding
+	for assetID, sc := range latest {
+		a, ok := s.assets[assetID]
+		if !ok {
+			continue
+		}
+		for _, f := range s.findings[sc.ID] {
+			out = append(out, model.CurrentFinding{
+				ProjectID:   a.ProjectID,
+				AssetID:     assetID,
+				Severity:    f.Severity,
+				Fingerprint: f.Fingerprint(),
+			})
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) ListAllTriage(_ context.Context) ([]model.Triage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]model.Triage, 0, len(s.triage))
+	for _, t := range s.triage {
+		out = append(out, t)
+	}
+	return out, nil
+}
+
+func (s *Store) SeverityTrend(_ context.Context, limit int) ([]model.ScanSeverityPoint, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var pts []model.ScanSeverityPoint
+	for _, sc := range s.scans {
+		if sc.Status != model.StatusCompleted {
+			continue
+		}
+		at := sc.CreatedAt
+		if sc.CompletedAt != nil {
+			at = *sc.CompletedAt
+		}
+		p := model.ScanSeverityPoint{ScanID: sc.ID, CompletedAt: at}
+		for _, f := range s.findings[sc.ID] {
+			switch f.Severity {
+			case model.SeverityCritical:
+				p.Critical++
+			case model.SeverityHigh:
+				p.High++
+			case model.SeverityMedium:
+				p.Medium++
+			case model.SeverityLow:
+				p.Low++
+			case model.SeverityInfo:
+				p.Info++
+			}
+		}
+		pts = append(pts, p)
+	}
+	sort.Slice(pts, func(i, j int) bool { return pts[i].CompletedAt.Before(pts[j].CompletedAt) })
+	if len(pts) > limit {
+		pts = pts[len(pts)-limit:]
+	}
+	return pts, nil
 }
 
 // compile-time check.

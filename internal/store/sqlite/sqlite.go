@@ -492,6 +492,93 @@ func (s *Store) ListDueSchedules(ctx context.Context, now time.Time) ([]model.Sc
 	return out, rows.Err()
 }
 
+// CurrentFindings returns findings from the latest COMPLETED scan of each asset.
+func (s *Store) CurrentFindings(ctx context.Context) ([]model.CurrentFinding, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT a.project_id, ls.asset_id, f.severity, f.fingerprint
+		 FROM findings f
+		 JOIN (
+		   SELECT sc.id AS scan_id, sc.asset_id
+		   FROM scans sc
+		   JOIN (
+		     SELECT asset_id, MAX(created_at) AS mx
+		     FROM scans WHERE status = 'COMPLETED' GROUP BY asset_id
+		   ) latest ON latest.asset_id = sc.asset_id AND latest.mx = sc.created_at
+		   WHERE sc.status = 'COMPLETED'
+		 ) ls ON ls.scan_id = f.scan_id
+		 JOIN assets a ON a.id = ls.asset_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.CurrentFinding
+	for rows.Next() {
+		var cf model.CurrentFinding
+		if err := rows.Scan(&cf.ProjectID, &cf.AssetID, &cf.Severity, &cf.Fingerprint); err != nil {
+			return nil, err
+		}
+		out = append(out, cf)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListAllTriage(ctx context.Context) ([]model.Triage, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT asset_id, fingerprint, status, note, updated_at FROM triage`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.Triage
+	for rows.Next() {
+		var t model.Triage
+		if err := rows.Scan(&t.AssetID, &t.Fingerprint, &t.Status, &t.Note, &t.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) SeverityTrend(ctx context.Context, limit int) ([]model.ScanSeverityPoint, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT sc.id, COALESCE(sc.completed_at, sc.created_at) AS at,
+		        SUM(CASE f.severity WHEN 'critical' THEN 1 ELSE 0 END),
+		        SUM(CASE f.severity WHEN 'high'     THEN 1 ELSE 0 END),
+		        SUM(CASE f.severity WHEN 'medium'   THEN 1 ELSE 0 END),
+		        SUM(CASE f.severity WHEN 'low'      THEN 1 ELSE 0 END),
+		        SUM(CASE f.severity WHEN 'info'     THEN 1 ELSE 0 END)
+		 FROM scans sc
+		 LEFT JOIN findings f ON f.scan_id = sc.id
+		 WHERE sc.status = 'COMPLETED'
+		 GROUP BY sc.id
+		 ORDER BY at DESC
+		 LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.ScanSeverityPoint
+	for rows.Next() {
+		var p model.ScanSeverityPoint
+		if err := rows.Scan(&p.ScanID, &p.CompletedAt, &p.Critical, &p.High, &p.Medium, &p.Low, &p.Info); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Return oldest-first for charting.
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
 func (s *Store) HasActiveScan(ctx context.Context, assetID string) (bool, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT 1 FROM scans WHERE asset_id = ? AND status IN ('PENDING','PROCESSING') LIMIT 1`, assetID)
