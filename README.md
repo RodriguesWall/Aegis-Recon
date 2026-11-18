@@ -32,8 +32,14 @@ A surface scan runs six native-Go modules concurrently:
 Findings export as native JSON or **SARIF 2.1.0** (consumable by GitHub code
 scanning and IDEs) — from the dashboard's Download menu or the export endpoint.
 
-No external scan engines — pure Go standard library (`net`, `crypto/tls`,
-`net/http`). Results are available as structured JSON (CLI) and through the API.
+The recon modules are pure Go standard library (`net`, `crypto/tls`,
+`net/http`). Active vulnerability checks are **optional** and powered by an
+adapter to [`nuclei`](https://github.com/projectdiscovery/nuclei): it is enabled
+per scan (default on), runs under a locked safety profile (no dos/intrusive/
+fuzzing templates, rate-limited, per-host timeout) and degrades to a no-op when
+the binary is absent. The Docker image bundles `nuclei` and its templates;
+outside Docker, install `nuclei` on `PATH` to use it. Results are available as
+structured JSON (CLI) and through the API.
 
 ---
 
