@@ -27,6 +27,8 @@ type Store struct {
 	triage map[string]model.Triage
 	// schedules keyed by asset_id.
 	schedules map[string]model.Schedule
+	// settings key→value.
+	settings map[string]string
 }
 
 // New returns an empty in-memory store.
@@ -38,6 +40,7 @@ func New() *Store {
 		findings:  map[string][]model.Finding{},
 		triage:    map[string]model.Triage{},
 		schedules: map[string]model.Schedule{},
+		settings:  map[string]string{},
 	}
 }
 
@@ -406,6 +409,30 @@ func (s *Store) SeverityTrend(_ context.Context, limit int) ([]model.ScanSeverit
 		pts = pts[len(pts)-limit:]
 	}
 	return pts, nil
+}
+
+func (s *Store) GetSetting(_ context.Context, key string) (string, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := s.settings[key]
+	return v, ok, nil
+}
+
+func (s *Store) SetSetting(_ context.Context, key, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settings[key] = value
+	return nil
+}
+
+func (s *Store) AllSettings(_ context.Context) (map[string]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[string]string, len(s.settings))
+	for k, v := range s.settings {
+		out[k] = v
+	}
+	return out, nil
 }
 
 // compile-time check.

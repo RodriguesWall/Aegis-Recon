@@ -16,6 +16,7 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/queue"
 	"github.com/RodriguesWall/aegis-recon/internal/report"
+	"github.com/RodriguesWall/aegis-recon/internal/secret"
 	"github.com/RodriguesWall/aegis-recon/internal/store"
 	"github.com/RodriguesWall/aegis-recon/internal/version"
 	"github.com/google/uuid"
@@ -38,6 +39,8 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /api/stats", s.stats)
+	mux.HandleFunc("GET /api/settings", s.getSettings)
+	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	mux.HandleFunc("POST /api/projects", s.createProject)
 	mux.HandleFunc("GET /api/projects", s.listProjects)
 	mux.HandleFunc("PATCH /api/projects/{id}", s.updateProject)
@@ -682,6 +685,69 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 		"projects": projList,
 		"trend":    trend,
 	})
+}
+
+// secretSettings holds the setting keys whose values are encrypted at rest and
+// never returned in plaintext by the API.
+var secretSettings = map[string]bool{
+	"smtp_pass": true,
+}
+
+// settingsResponse is the masked view of the settings: non-secret values inline,
+// secrets reported only as present/absent.
+func settingsResponse(all map[string]string) map[string]any {
+	values := map[string]string{}
+	secretsSet := map[string]bool{}
+	for k, v := range all {
+		if secretSettings[k] {
+			secretsSet[k] = v != ""
+		} else {
+			values[k] = v
+		}
+	}
+	return map[string]any{"settings": values, "secrets_set": secretsSet}
+}
+
+func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
+	all, err := s.store.AllSettings(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, settingsResponse(all))
+}
+
+// putSettings upserts a flat {key: value} map. Secret keys are encrypted before
+// storage; an empty value for a secret leaves the existing one unchanged (so the
+// UI can submit without re-entering the password).
+func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
+	var in map[string]string
+	if !readJSON(w, r, &in) {
+		return
+	}
+	for k, v := range in {
+		if secretSettings[k] {
+			if v == "" {
+				continue // keep the stored secret
+			}
+			enc, err := secret.Encrypt(v)
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			v = enc
+		}
+		if err := s.store.SetSetting(r.Context(), k, v); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	all, err := s.store.AllSettings(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, settingsResponse(all))
 }
 
 // ---- helpers ----

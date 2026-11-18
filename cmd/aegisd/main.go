@@ -22,6 +22,7 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/queue"
 	"github.com/RodriguesWall/aegis-recon/internal/scansvc"
 	"github.com/RodriguesWall/aegis-recon/internal/scheduler"
+	"github.com/RodriguesWall/aegis-recon/internal/secret"
 	"github.com/RodriguesWall/aegis-recon/internal/store/sqlite"
 	"github.com/RodriguesWall/aegis-recon/internal/version"
 )
@@ -38,6 +39,10 @@ func main() {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	if secret.UsingBakedKey() {
+		logger.Warn("AEGIS_SECRET_KEY not set — stored secrets use a weak baked key; set AEGIS_SECRET_KEY in production")
+	}
 
 	addr := envOr("AEGIS_ADDR", "127.0.0.1:8080")
 	dbPath := envOr("AEGIS_DB", filepath.Join("db", "aegis.db"))

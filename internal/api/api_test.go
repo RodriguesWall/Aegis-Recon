@@ -14,6 +14,7 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/model"
 	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/queue"
+	"github.com/RodriguesWall/aegis-recon/internal/secret"
 	"github.com/RodriguesWall/aegis-recon/internal/store/memory"
 )
 
@@ -298,6 +299,53 @@ func TestStats(t *testing.T) {
 
 type sevStub struct {
 	Critical, High, Medium, Low, Info, Total int
+}
+
+func TestSettings(t *testing.T) {
+	st := memory.New()
+	q := queue.New(func(context.Context, string) error { return nil })
+	h := api.New(st, q, progress.New()).Routes()
+
+	// PUT a visible setting and a secret.
+	w := do(t, h, "PUT", "/api/settings", `{"smtp_host":"mail.example.com","smtp_pass":"hunter2"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("put settings: %d %s", w.Code, w.Body)
+	}
+
+	// GET must expose smtp_host but never the password; secrets_set reports it.
+	w = do(t, h, "GET", "/api/settings", "")
+	var got struct {
+		Settings   map[string]string `json:"settings"`
+		SecretsSet map[string]bool   `json:"secrets_set"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v\n%s", err, w.Body)
+	}
+	if got.Settings["smtp_host"] != "mail.example.com" {
+		t.Fatalf("smtp_host wrong: %+v", got.Settings)
+	}
+	if _, leaked := got.Settings["smtp_pass"]; leaked {
+		t.Fatal("smtp_pass must not be returned in plaintext")
+	}
+	if !got.SecretsSet["smtp_pass"] {
+		t.Fatalf("secrets_set should report smtp_pass set: %+v", got.SecretsSet)
+	}
+
+	// The stored value must be encrypted, and decrypt back to the original.
+	raw, _, _ := st.GetSetting(context.Background(), "smtp_pass")
+	if raw == "hunter2" {
+		t.Fatal("password stored in plaintext")
+	}
+	if dec, err := secret.Decrypt(raw); err != nil || dec != "hunter2" {
+		t.Fatalf("stored secret did not decrypt: dec=%q err=%v", dec, err)
+	}
+
+	// Empty secret on PUT keeps the existing one.
+	do(t, h, "PUT", "/api/settings", `{"smtp_pass":""}`)
+	raw2, _, _ := st.GetSetting(context.Background(), "smtp_pass")
+	if raw2 != raw {
+		t.Fatal("empty secret value should not overwrite the stored password")
+	}
 }
 
 func TestScanOnMissingAsset(t *testing.T) {

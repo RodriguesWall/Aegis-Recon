@@ -70,5 +70,12 @@ type Store interface {
 	// scans, oldest first, capped at limit.
 	SeverityTrend(ctx context.Context, limit int) ([]model.ScanSeverityPoint, error)
 
+	// GetSetting returns one app setting's value (found=false when absent).
+	GetSetting(ctx context.Context, key string) (value string, found bool, err error)
+	// SetSetting upserts one app setting.
+	SetSetting(ctx context.Context, key, value string) error
+	// AllSettings returns every app setting as a key→value map.
+	AllSettings(ctx context.Context) (map[string]string, error)
+
 	Close() error
 }
