@@ -43,39 +43,47 @@ export function Projects() {
   }
 
   return (
-    <div className="space-y-6">
-      {stats && <Dashboard stats={stats} />}
+    <div className="lg:grid lg:grid-cols-[3fr_2fr] lg:items-start lg:gap-6">
+      {/* Left (~60%): project management. */}
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-2xl">
+            <span className="gradient-text">Projects</span>
+          </h2>
+          <p className="text-muted">Register a project and its services to scan.</p>
+        </div>
 
-      <div className="pt-2">
-        <h2 className="text-2xl">
-          <span className="gradient-text">Projects</span>
-        </h2>
-        <p className="text-muted">Register a project and its services to scan.</p>
+        <form onSubmit={create} className="glass-card flex gap-3">
+          <input
+            className="input"
+            placeholder="Project name (e.g. Product X)"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <button type="submit" className="btn-primary whitespace-nowrap">
+            Create
+          </button>
+        </form>
+
+        {error && <p className="text-sev-critical">{error}</p>}
+        {loading && <p className="text-muted">Loading…</p>}
+
+        <div className="grid gap-4">
+          {projects.map((p) => (
+            <ProjectCard key={p.id} project={p} onChanged={load} />
+          ))}
+        </div>
+
+        {!loading && projects.length === 0 && (
+          <p className="text-muted">No projects yet.</p>
+        )}
       </div>
 
-      <form onSubmit={create} className="glass-card flex gap-3">
-        <input
-          className="input"
-          placeholder="Project name (e.g. Product X)"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <button type="submit" className="btn-primary whitespace-nowrap">
-          Create
-        </button>
-      </form>
-
-      {error && <p className="text-sev-critical">{error}</p>}
-      {loading && <p className="text-muted">Loading…</p>}
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        {projects.map((p) => (
-          <ProjectCard key={p.id} project={p} onChanged={load} />
-        ))}
-      </div>
-
-      {!loading && projects.length === 0 && (
-        <p className="text-muted">No projects yet.</p>
+      {/* Right (~40%): aggregate dashboard, sticky alongside the list. */}
+      {stats && (
+        <div className="mt-8 lg:mt-0 lg:sticky lg:top-20">
+          <Dashboard stats={stats} />
+        </div>
       )}
     </div>
   )

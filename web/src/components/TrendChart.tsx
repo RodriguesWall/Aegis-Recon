@@ -10,7 +10,7 @@ const SERIES: { key: keyof Omit<TrendPoint, "scan_id" | "completed_at">; label: 
   { key: "info", label: "Info", color: "#94a3b8" },
 ]
 
-const H = 140 // plot height in px
+const H = 108 // plot height in px
 
 // TrendChart draws one stacked bar per completed scan (oldest → newest),
 // segmented by severity. Pure CSS; each segment carries a native hover tooltip.
