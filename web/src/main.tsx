@@ -5,6 +5,7 @@ import { Layout } from "./components/Layout"
 import { Projects } from "./pages/Projects"
 import { ProjectDetail } from "./pages/ProjectDetail"
 import { ScanDetail } from "./pages/ScanDetail"
+import { Settings } from "./pages/Settings"
 import "./index.css"
 
 const router = createBrowserRouter([
@@ -15,6 +16,7 @@ const router = createBrowserRouter([
       { index: true, element: <Projects /> },
       { path: "projects/:id", element: <ProjectDetail /> },
       { path: "scans/:id", element: <ScanDetail /> },
+      { path: "settings", element: <Settings /> },
     ],
   },
 ])

@@ -19,10 +19,18 @@ export function Layout() {
           borderBottom: "1px solid rgba(255,255,255,0.05)",
         }}
       >
-        <Link to="/" className="text-xl font-bold">
-          <span className="gradient-text">Aegis</span>
-          <span className="text-white">-Recon</span>
-        </Link>
+        <div className="flex items-center gap-6">
+          <Link to="/" className="text-xl font-bold">
+            <span className="gradient-text">Aegis</span>
+            <span className="text-white">-Recon</span>
+          </Link>
+          <Link to="/" className="text-sm text-muted hover:text-white">
+            Projects
+          </Link>
+          <Link to="/settings" className="text-sm text-muted hover:text-white">
+            Settings
+          </Link>
+        </div>
         <span className="text-sm text-muted">attack surface dashboard</span>
       </nav>
       <main className="mx-auto w-full max-w-7xl px-4 py-8">

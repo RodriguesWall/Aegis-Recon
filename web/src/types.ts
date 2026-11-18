@@ -97,6 +97,11 @@ export interface Stats {
   trend: TrendPoint[]
 }
 
+export interface SettingsData {
+  settings: Record<string, string>
+  secrets_set: Record<string, boolean>
+}
+
 export interface Schedule {
   asset_id: string
   interval_minutes: number
