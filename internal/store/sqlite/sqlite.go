@@ -545,7 +545,7 @@ func (s *Store) SeverityTrend(ctx context.Context, limit int) ([]model.ScanSever
 		limit = 30
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT sc.id, COALESCE(sc.completed_at, sc.created_at) AS at,
+		`SELECT sc.id, sc.completed_at, sc.created_at,
 		        SUM(CASE f.severity WHEN 'critical' THEN 1 ELSE 0 END),
 		        SUM(CASE f.severity WHEN 'high'     THEN 1 ELSE 0 END),
 		        SUM(CASE f.severity WHEN 'medium'   THEN 1 ELSE 0 END),
@@ -555,7 +555,7 @@ func (s *Store) SeverityTrend(ctx context.Context, limit int) ([]model.ScanSever
 		 LEFT JOIN findings f ON f.scan_id = sc.id
 		 WHERE sc.status = 'COMPLETED'
 		 GROUP BY sc.id
-		 ORDER BY at DESC
+		 ORDER BY COALESCE(sc.completed_at, sc.created_at) DESC
 		 LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -564,8 +564,16 @@ func (s *Store) SeverityTrend(ctx context.Context, limit int) ([]model.ScanSever
 	var out []model.ScanSeverityPoint
 	for rows.Next() {
 		var p model.ScanSeverityPoint
-		if err := rows.Scan(&p.ScanID, &p.CompletedAt, &p.Critical, &p.High, &p.Medium, &p.Low, &p.Info); err != nil {
+		// completed_at is nullable; selecting the raw columns keeps the driver's
+		// TIMESTAMP->time.Time mapping (COALESCE in SELECT loses it -> string).
+		var completed *time.Time
+		var created time.Time
+		if err := rows.Scan(&p.ScanID, &completed, &created, &p.Critical, &p.High, &p.Medium, &p.Low, &p.Info); err != nil {
 			return nil, err
+		}
+		p.CompletedAt = created
+		if completed != nil {
+			p.CompletedAt = *completed
 		}
 		out = append(out, p)
 	}
