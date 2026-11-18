@@ -7,9 +7,10 @@ scans against them, and review the findings in one place. It is built as a clean
 concurrent Go codebase — a single core engine shared by a CLI and an HTTP API,
 with a React dashboard on top.
 
-**Status:** 🚧 Work in progress — V1 in development. The engine, CLI, HTTP API,
-job queue and dashboard are working end to end; polish items (SARIF export,
-release artifacts, coverage) are still open.
+**Status:** V1 (attack surface) and V2 (vulnerability & platform) are complete and
+working end to end — engine, CLI, HTTP API, job queue, React dashboard, SARIF/JSON
+export, scan diffing, finding triage, scheduled scans, an optional Nuclei adapter,
+WAF/CDN detection and an aggregate risk dashboard.
 
 ---
 
@@ -18,16 +19,28 @@ release artifacts, coverage) are still open.
 Register a **Project**, add **Assets** (domain, host, web-app, api), trigger a
 **surface scan**, and review the **findings** — from the CLI or the dashboard.
 
-A surface scan runs six native-Go modules concurrently:
+A surface scan runs these native-Go modules concurrently:
 
 | Module | What it checks |
 |---|---|
 | `dns` | A/AAAA/MX/NS/TXT/CNAME records |
-| `subdomain` | Passive (crt.sh) + bounded wordlist bruteforce |
+| `subdomain` | Passive (crt.sh, with retry + cache) + bounded wordlist bruteforce |
 | `port` | Concurrent TCP connect scan + banner grab |
 | `tls` | Certificate validity, expiry, chain, SAN, ciphers |
 | `httpprobe` | Status, redirects, title, security headers |
 | `fingerprint` | Technology/stack detection |
+| `cdn` | WAF/CDN detection (header + CNAME heuristics; Cloudflare, Akamai, CloudFront, Fastly, Sucuri, Imperva, …) |
+
+On top of the scan itself:
+
+- **Change detection** — each scan is diffed against the previous one: findings
+  are labelled **new / resolved / unchanged** by a stable fingerprint.
+- **Triage** — mark any finding `open / false-positive / accepted-risk / fixed`;
+  the verdict is persisted per asset and survives re-scans (triaged findings stop
+  resurfacing as "new").
+- **Scheduled scans** — run a scan per service on a fixed interval.
+- **Risk dashboard** — aggregate severity, triage breakdown and a severity trend
+  over recent scans, on the home page.
 
 Findings export as native JSON or **SARIF 2.1.0** (consumable by GitHub code
 scanning and IDEs) — from the dashboard's Download menu or the export endpoint.
@@ -66,7 +79,8 @@ worker pool.
         ▼
 ┌───────────────────────────────────────┐   phase 2: probe fan-out
 │  worker pool (semaphore + WaitGroup)   │   per-host rate limit (anti-DoS)
-│  dns · port · tls · httpprobe · fp     │
+│  dns · port · tls · httpprobe · fp ·   │
+│  cdn · nuclei (optional)               │
 └───────┬────────────────────────────────┘
         │
         ▼
@@ -78,10 +92,12 @@ worker pool.
 ## Architecture
 
 ```
-            internal/engine   (two-phase pipeline, worker pool)
-            internal/scanner  (dns, subdomain, port, tls, httpprobe, fingerprint)
-            internal/scope    (allowlist + per-host rate limiter)
-            internal/store    (SQLite, behind an interface)
+            internal/engine    (two-phase pipeline, worker pool)
+            internal/scanner   (dns, subdomain, port, tls, httpprobe, fingerprint, cdn, nuclei)
+            internal/scope     (allowlist + per-host rate limiter)
+            internal/diff      (scan diffing by fingerprint)
+            internal/scheduler (interval-based scheduled scans)
+            internal/store     (SQLite, behind an interface)
                    │
      ┌─────────────┴───────────────────────────┐
      ▼                                          ▼
@@ -105,13 +121,17 @@ worker pool.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/health` | Liveness check |
+| `GET` | `/health` | Liveness check + version |
+| `GET` | `/api/stats` | Aggregate dashboard: totals, severity, triage, per-project, trend |
 | `POST` / `GET` | `/api/projects` | Create / list projects |
 | `PATCH` / `DELETE` | `/api/projects/{id}` | Rename / delete a project (cascade) |
 | `POST` / `GET` | `/api/projects/{id}/assets` | Create / list assets |
-| `PATCH` / `DELETE` | `/api/assets/{id}` | Rename / delete an asset (cascade) |
-| `POST` / `GET` | `/api/assets/{id}/scans` | Trigger / list scans |
-| `GET` | `/api/scans/{id}` | Scan status + findings |
+| `PATCH` / `DELETE` | `/api/assets/{id}` | Update (name, scope, blacklist) / delete an asset (cascade) |
+| `GET` / `PUT` | `/api/assets/{id}/schedule` | Get / set the scheduled-scan interval |
+| `PUT` | `/api/assets/{id}/triage` | Set a finding's triage status (by fingerprint) |
+| `POST` / `GET` | `/api/assets/{id}/scans` | Trigger / list scans (list includes top severity) |
+| `GET` | `/api/scans/{id}` | Scan status + findings (with fingerprints) + triage map |
+| `GET` | `/api/scans/{id}/diff` | Diff vs the previous completed scan (new/resolved/unchanged) |
 | `GET` | `/api/scans/{id}/progress` | Live progress (phase, done/total, log) |
 | `GET` | `/api/scans/{id}/export?format=json\|sarif` | Download findings (native JSON or SARIF 2.1.0) |
 | `DELETE` | `/api/scans/{id}` | Delete a scan |
@@ -132,7 +152,14 @@ make build
 
 # run the dashboard (dev) — in another terminal
 cd web && npm install && npm run dev   # http://localhost:5173
+
+# optional: load demo data (fake domains) for a populated dashboard
+make seed
 ```
+
+The Docker image bundles `nuclei` and its templates, so active vulnerability
+checks work out of the box; run the binaries directly and they are used only if
+`nuclei` is on `PATH`.
 
 Or bring up the API + dashboard together with Docker:
 
@@ -178,6 +205,10 @@ probe runs:
 - **Typed severity** — `critical | high | medium | low | info`.
 - **Structured evidence** on every finding.
 
+The native recon path is GET/HEAD only. The optional Nuclei adapter performs
+active checks, but runs under a locked profile (no dos/intrusive/fuzzing
+templates, rate-limited, per-host timeout) and is opt-in per scan.
+
 ---
 
 ## Authorized use only
@@ -192,23 +223,30 @@ operator.
 
 ## Roadmap
 
-### V1 — Attack surface
+### V1 — Attack surface ✓
 - [x] Core engine: concurrent worker pool, injectable resolver/dialer
-- [x] Six surface-recon modules
+- [x] Surface-recon modules (dns, subdomain, port, tls, httpprobe, fingerprint)
 - [x] Two-phase pipeline (discovery → scope gate → probe fan-out)
 - [x] SQLite store (WAL, single-writer)
 - [x] CLI (`aegis scan <domain>`)
 - [x] HTTP API (projects, assets, scans) + job queue — single-user
 - [x] React dashboard (live scan progress, findings view)
 - [x] SARIF + JSON export (API endpoint + dashboard Download menu)
-- [ ] Strong test coverage
 
-### V2 — Vulnerability & platform
-- [ ] Vulnerability scan: native checks (headers, weak TLS, cookie flags, exposed files)
-- [ ] `nuclei` adapter for OWASP coverage
-- [ ] Dependency track / SCA (OSV.dev)
+### V2 — Vulnerability & platform ✓
+- [x] Change detection: diff each scan vs the previous (new/resolved/unchanged) by fingerprint
+- [x] Triage workflow: per-finding `open / false-positive / accepted-risk / fixed`, persisted per asset
+- [x] Scheduled scans (fixed interval per service)
+- [x] Vulnerability scan via a `nuclei` adapter (optional, locked safety profile, Docker-bundled)
+- [x] WAF/CDN detection (header + CNAME heuristics)
+- [x] Aggregate risk dashboard (severity, triage, trend)
+- [x] Per-asset scan blacklist
+
+### V3 — Planned
+- [ ] PDF report export
 - [ ] Authentication + multi-tenant (`owner_id` already in the schema)
-- [ ] Domain-ownership verification (DNS TXT), scheduled scans
+- [ ] Dependency track / SCA (OSV.dev)
+- [ ] Asset ownership verification (DNS TXT)
 
 ---
 
