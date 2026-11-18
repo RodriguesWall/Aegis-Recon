@@ -80,6 +80,46 @@ func TestScopeAllSendsManual(t *testing.T) {
 	}
 }
 
+func TestWebhookSends(t *testing.T) {
+	st := memory.New()
+	ctx := context.Background()
+	st.CreateProject(ctx, &model.Project{ID: "p1", Name: "P"})
+	st.CreateAsset(ctx, &model.Asset{ID: "a1", ProjectID: "p1", Name: "acme.example", Type: model.AssetDomain})
+	for k, v := range map[string]string{
+		"notify_webhook_enabled": "true", "notify_scope": "all", "webhook_url": "https://hook.example/x",
+	} {
+		st.SetSetting(ctx, k, v)
+	}
+	var got WebhookPayload
+	calls := 0
+	s := New(st, nil).WithWebhookSender(func(url string, p WebhookPayload) error {
+		calls++
+		got = p
+		return nil
+	})
+	s.ScanComplete(ctx, scan(model.TriggerManual), findings())
+	if calls != 1 {
+		t.Fatalf("expected 1 webhook call, got %d", calls)
+	}
+	if got.Event != "scan.completed" || got.Asset != "acme.example" || got.Findings != 1 {
+		t.Fatalf("payload fields wrong: %+v", got)
+	}
+	if got.Severity["high"] != 1 {
+		t.Fatalf("severity map wrong: %+v", got.Severity)
+	}
+	if got.Text == "" {
+		t.Fatal("payload text summary empty")
+	}
+}
+
+func TestNeitherChannelNoSend(t *testing.T) {
+	s, cap, _ := setup(t, map[string]string{"notify_email_enabled": "false", "notify_webhook_enabled": "false"})
+	s.ScanComplete(context.Background(), scan(model.TriggerScheduled), findings())
+	if cap.calls != 0 {
+		t.Fatal("no channel enabled must not send")
+	}
+}
+
 func TestDecryptsSMTPPass(t *testing.T) {
 	enc, _ := secret.Encrypt("hunter2")
 	s, cap, _ := setup(t, map[string]string{

@@ -15,18 +15,22 @@ import (
 // EmailSender delivers one email; injectable for tests.
 type EmailSender func(cfg SMTPConfig, subject, body string) error
 
+// WebhookSender posts one webhook payload; injectable for tests.
+type WebhookSender func(url string, payload WebhookPayload) error
+
 // Service decides whether to notify and dispatches the configured channels. It
 // reads its config from the persisted settings every time, so changes take
 // effect without a restart.
 type Service struct {
-	store     store.Store
-	logger    *slog.Logger
-	emailSend EmailSender
+	store       store.Store
+	logger      *slog.Logger
+	emailSend   EmailSender
+	webhookSend WebhookSender
 }
 
 // New builds a notify Service backed by the store's settings.
 func New(st store.Store, logger *slog.Logger) *Service {
-	return &Service{store: st, logger: logger, emailSend: sendEmail}
+	return &Service{store: st, logger: logger, emailSend: sendEmail, webhookSend: sendWebhook}
 }
 
 // WithEmailSender overrides the email transport (tests).
@@ -35,15 +39,24 @@ func (s *Service) WithEmailSender(fn EmailSender) *Service {
 	return s
 }
 
-// ScanComplete notifies about a completed scan, honoring the configured channels
-// and scope. Best-effort: failures are logged, never returned.
+// WithWebhookSender overrides the webhook transport (tests).
+func (s *Service) WithWebhookSender(fn WebhookSender) *Service {
+	s.webhookSend = fn
+	return s
+}
+
+// ScanComplete notifies about a completed scan over every enabled channel,
+// honoring the configured scope. Best-effort: failures are logged, never
+// returned.
 func (s *Service) ScanComplete(ctx context.Context, scan *model.Scan, findings []model.Finding) {
 	set, err := s.store.AllSettings(ctx)
 	if err != nil {
 		s.logf("notify: load settings", "err", err)
 		return
 	}
-	if set["notify_email_enabled"] != "true" {
+	emailOn := set["notify_email_enabled"] == "true"
+	webhookOn := set["notify_webhook_enabled"] == "true"
+	if !emailOn && !webhookOn {
 		return
 	}
 	// Scope: "scheduled" (default) notifies only scheduled scans; "all" notifies
@@ -62,27 +75,55 @@ func (s *Service) ScanComplete(ctx context.Context, scan *model.Scan, findings [
 	}
 	subject, body := scanEmail(asset, scan, findings)
 
-	cfg := SMTPConfig{
-		Host:     set["smtp_host"],
-		Port:     set["smtp_port"],
-		User:     set["smtp_user"],
-		From:     set["smtp_from"],
-		To:       set["smtp_to"],
-		Security: set["smtp_security"],
-	}
-	if enc := set["smtp_pass"]; enc != "" {
-		if dec, err := secret.Decrypt(enc); err == nil {
-			cfg.Pass = dec
+	if emailOn {
+		cfg := SMTPConfig{
+			Host:     set["smtp_host"],
+			Port:     set["smtp_port"],
+			User:     set["smtp_user"],
+			From:     set["smtp_from"],
+			To:       set["smtp_to"],
+			Security: set["smtp_security"],
+		}
+		if enc := set["smtp_pass"]; enc != "" {
+			if dec, err := secret.Decrypt(enc); err == nil {
+				cfg.Pass = dec
+			} else {
+				s.logf("notify: decrypt smtp_pass", "err", err)
+			}
+		}
+		if err := s.emailSend(cfg, subject, body); err != nil {
+			s.logf("notify: send email", "scan", scan.ID, "err", err)
 		} else {
-			s.logf("notify: decrypt smtp_pass", "err", err)
+			s.logf("notify: email sent", "scan", scan.ID, "asset", asset)
 		}
 	}
 
-	if err := s.emailSend(cfg, subject, body); err != nil {
-		s.logf("notify: send email", "scan", scan.ID, "err", err)
-		return
+	if webhookOn {
+		if url := set["webhook_url"]; url != "" {
+			payload := WebhookPayload{
+				Text:     body,
+				Event:    "scan.completed",
+				ScanID:   scan.ID,
+				Asset:    asset,
+				Status:   string(scan.Status),
+				Findings: len(findings),
+				Severity: severityCounts(findings),
+			}
+			if err := s.webhookSend(url, payload); err != nil {
+				s.logf("notify: send webhook", "scan", scan.ID, "err", err)
+			} else {
+				s.logf("notify: webhook sent", "scan", scan.ID, "asset", asset)
+			}
+		}
 	}
-	s.logf("notify: email sent", "scan", scan.ID, "asset", asset)
+}
+
+func severityCounts(findings []model.Finding) map[string]int {
+	c := map[string]int{}
+	for _, f := range findings {
+		c[string(f.Severity)]++
+	}
+	return c
 }
 
 func (s *Service) logf(msg string, args ...any) {
