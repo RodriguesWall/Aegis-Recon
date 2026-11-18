@@ -1,13 +1,34 @@
 import { useEffect, useState } from "react"
 import { Link, Outlet } from "react-router-dom"
 import { api } from "../api/client"
+import { Login } from "./Login"
 
 export function Layout() {
   const [version, setVersion] = useState("")
+  const [auth, setAuth] = useState<{ enabled: boolean; authenticated: boolean } | null>(null)
+
+  function checkAuth() {
+    void api
+      .getAuth()
+      .then(setAuth)
+      .catch(() => setAuth({ enabled: false, authenticated: true }))
+  }
 
   useEffect(() => {
     void api.getHealth().then((h) => setVersion(h.version ?? ""))
+    checkAuth()
   }, [])
+
+  async function logout() {
+    try {
+      await api.logout()
+    } finally {
+      checkAuth()
+    }
+  }
+
+  if (!auth) return null
+  if (auth.enabled && !auth.authenticated) return <Login onDone={checkAuth} />
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -34,7 +55,14 @@ export function Layout() {
             Settings
           </Link>
         </div>
-        <span className="text-sm text-muted">attack surface dashboard</span>
+        <div className="flex items-center gap-4">
+          <span className="text-sm text-muted">attack surface dashboard</span>
+          {auth.enabled && (
+            <button className="text-sm text-muted hover:text-white" onClick={() => void logout()}>
+              Logout
+            </button>
+          )}
+        </div>
       </nav>
       <main className="mx-auto w-full max-w-7xl px-4 py-8">
         <Outlet />

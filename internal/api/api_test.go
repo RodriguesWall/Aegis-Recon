@@ -302,6 +302,41 @@ type sevStub struct {
 	Critical, High, Medium, Low, Info, Total int
 }
 
+func TestAuthFlow(t *testing.T) {
+	t.Setenv("AEGIS_ADMIN_PASSWORD", "s3cret")
+	st := memory.New()
+	q := queue.New(func(context.Context, string) error { return nil })
+	h := api.New(st, q, progress.New()).Routes()
+
+	// Protected endpoint without a session -> 401.
+	if w := do(t, h, "GET", "/api/projects", ""); w.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401 unauthenticated, got %d", w.Code)
+	}
+	// Wrong password -> 401, no cookie.
+	if w := do(t, h, "POST", "/api/login", `{"password":"nope"}`); w.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401 bad login, got %d", w.Code)
+	}
+	// Correct password -> 200 + Set-Cookie.
+	w := do(t, h, "POST", "/api/login", `{"password":"s3cret"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("login failed: %d %s", w.Code, w.Body)
+	}
+	cookies := w.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("login set no cookie")
+	}
+	// Reuse the cookie on a protected request -> 200.
+	r := httptest.NewRequest("GET", "/api/projects", nil)
+	for _, c := range cookies {
+		r.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 with session, got %d", rec.Code)
+	}
+}
+
 func TestFindingsList(t *testing.T) {
 	st := memory.New()
 	q := queue.New(func(context.Context, string) error { return nil })

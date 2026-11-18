@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RodriguesWall/aegis-recon/internal/auth"
 	"github.com/RodriguesWall/aegis-recon/internal/diff"
 	"github.com/RodriguesWall/aegis-recon/internal/model"
 	"github.com/RodriguesWall/aegis-recon/internal/progress"
@@ -39,6 +40,9 @@ func New(st store.Store, q *queue.Queue, tracker *progress.Tracker) *Server {
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
+	mux.HandleFunc("GET /api/auth", s.authStatus)
+	mux.HandleFunc("POST /api/login", s.login)
+	mux.HandleFunc("POST /api/logout", s.logout)
 	mux.HandleFunc("GET /api/stats", s.stats)
 	mux.HandleFunc("GET /api/findings", s.findings)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
@@ -61,7 +65,37 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/assets/{id}/schedule", s.getSchedule)
 	mux.HandleFunc("PUT /api/assets/{id}/schedule", s.setSchedule)
 	mux.HandleFunc("DELETE /api/scans/{id}", s.deleteScan)
-	return cors(mux)
+	return cors(auth.Middleware(mux))
+}
+
+// authStatus reports whether auth is enabled and the caller is authenticated.
+func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]bool{
+		"enabled":       auth.Enabled(),
+		"authenticated": !auth.Enabled() || auth.Valid(r),
+	})
+}
+
+// login verifies the admin password and issues a session cookie.
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Password string `json:"password"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if !auth.CheckPassword(in.Password) {
+		writeErr(w, http.StatusUnauthorized, "invalid password")
+		return
+	}
+	auth.IssueCookie(w)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// logout clears the session cookie.
+func (s *Server) logout(w http.ResponseWriter, _ *http.Request) {
+	auth.ClearCookie(w)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---- handlers ----

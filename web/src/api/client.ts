@@ -37,6 +37,10 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  getAuth: () => req<{ enabled: boolean; authenticated: boolean }>("/auth"),
+  login: (password: string) =>
+    req<{ ok: boolean }>("/login", { method: "POST", body: JSON.stringify({ password }) }),
+  logout: () => req<void>("/logout", { method: "POST" }),
   getStats: (projectID = "", assetID = "") => {
     const q = new URLSearchParams()
     if (projectID) q.set("project", projectID)
