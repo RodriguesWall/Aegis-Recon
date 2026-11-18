@@ -264,6 +264,7 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 		Status:      model.StatusPending,
 		IncludeInfo: in.IncludeInfo,
 		UseNuclei:   useNuclei,
+		Trigger:     model.TriggerManual,
 		CreatedAt:   time.Now().UTC(),
 	}
 	if err := s.store.CreateScan(r.Context(), scan); err != nil {

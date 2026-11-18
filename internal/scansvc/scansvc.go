@@ -14,6 +14,7 @@ import (
 
 	"github.com/RodriguesWall/aegis-recon/internal/engine"
 	"github.com/RodriguesWall/aegis-recon/internal/model"
+	"github.com/RodriguesWall/aegis-recon/internal/notify"
 	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/cdn"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/dns"
@@ -36,6 +37,7 @@ type Service struct {
 	discoverers     []model.Discoverer
 	nucleiBin       string
 	nucleiTemplates string
+	notifier        *notify.Service
 	logger          *slog.Logger
 }
 
@@ -59,6 +61,7 @@ func New(st store.Store, tracker *progress.Tracker, logger *slog.Logger) *Servic
 		discoverers:     []model.Discoverer{subdomain.New(resolver)},
 		nucleiBin:       envOr("AEGIS_NUCLEI_BIN", "nuclei"),
 		nucleiTemplates: os.Getenv("AEGIS_NUCLEI_TEMPLATES"),
+		notifier:        notify.New(st, logger),
 		logger:          logger,
 	}
 }
@@ -166,6 +169,14 @@ func (s *Service) Run(ctx context.Context, scanID string) (err error) {
 	if s.logger != nil {
 		s.logger.Info("scan completed", "scan", scanID, "domain", domain,
 			"findings", len(result.Findings), "errors", len(result.Meta.Errors))
+	}
+
+	// Best-effort notification (email/webhook), decoupled from the scan result.
+	// Uses a background context so it is not cancelled when this job's ctx ends.
+	if s.notifier != nil {
+		completed := *scan
+		notifyFindings := append([]model.Finding(nil), findings...)
+		go s.notifier.ScanComplete(context.Background(), &completed, notifyFindings)
 	}
 	return nil
 }
