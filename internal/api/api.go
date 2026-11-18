@@ -548,13 +548,27 @@ func (s *Server) exportScan(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", `attachment; filename="scan-`+id+`.csv"`)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(b)
+	case "pdf":
+		asset := scan.AssetID
+		if a, err := s.store.GetAsset(r.Context(), scan.AssetID); err == nil {
+			asset = a.Name
+		}
+		b, err := report.PDF(asset, *scan, findings)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Header().Set("Content-Disposition", `attachment; filename="scan-`+id+`.pdf"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(b)
 	case "", "json":
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Disposition", `attachment; filename="scan-`+id+`.json"`)
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]any{"scan": scan, "findings": findings})
 	default:
-		writeErr(w, http.StatusBadRequest, "unknown format (use json, sarif or csv)")
+		writeErr(w, http.StatusBadRequest, "unknown format (use json, sarif, csv or pdf)")
 	}
 }
 

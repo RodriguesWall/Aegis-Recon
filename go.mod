@@ -3,6 +3,7 @@ module github.com/RodriguesWall/aegis-recon
 go 1.26
 
 require (
+	github.com/go-pdf/fpdf v0.9.0
 	github.com/google/uuid v1.6.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.34.1
