@@ -77,5 +77,10 @@ type Store interface {
 	// AllSettings returns every app setting as a key→value map.
 	AllSettings(ctx context.Context) (map[string]string, error)
 
+	// PruneScans deletes an asset's scans beyond the newest keep (by created_at),
+	// cascading their findings. keep <= 0 is a no-op. Returns how many scans were
+	// deleted.
+	PruneScans(ctx context.Context, assetID string, keep int) (int, error)
+
 	Close() error
 }

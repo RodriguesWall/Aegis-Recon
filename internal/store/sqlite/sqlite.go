@@ -603,6 +603,54 @@ func (s *Store) SeverityTrend(ctx context.Context, limit int) ([]model.ScanSever
 	return out, nil
 }
 
+// PruneScans deletes the asset's scans beyond the newest keep, and their
+// findings, in one transaction.
+func (s *Store) PruneScans(ctx context.Context, assetID string, keep int) (int, error) {
+	if keep <= 0 {
+		return 0, nil
+	}
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// IDs to delete: everything after the newest `keep` by created_at.
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id FROM scans WHERE asset_id = ? ORDER BY created_at DESC LIMIT -1 OFFSET ?`,
+		assetID, keep)
+	if err != nil {
+		return 0, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM findings WHERE scan_id = ?`, id); err != nil {
+			return 0, err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM scans WHERE id = ?`, id); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(ids), nil
+}
+
 func (s *Store) GetSetting(ctx context.Context, key string) (string, bool, error) {
 	var v string
 	err := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, key).Scan(&v)

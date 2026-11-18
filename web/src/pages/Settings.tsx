@@ -10,6 +10,7 @@ const TEXT_KEYS = [
   "smtp_from",
   "smtp_to",
   "webhook_url",
+  "retention_keep",
 ] as const
 
 export function Settings() {
@@ -138,6 +139,15 @@ export function Settings() {
       <div className="glass-card space-y-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted">Webhook</p>
         <Input label="URL" placeholder="https://hooks.slack.com/..." {...field("webhook_url")} />
+      </div>
+
+      <div className="glass-card space-y-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted">Retention</p>
+        <Input
+          label="Keep last N scans per service (0 = unlimited; default 30)"
+          placeholder="30"
+          {...field("retention_keep")}
+        />
       </div>
 
       <div className="flex items-center gap-3">

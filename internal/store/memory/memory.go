@@ -411,6 +411,31 @@ func (s *Store) SeverityTrend(_ context.Context, limit int) ([]model.ScanSeverit
 	return pts, nil
 }
 
+func (s *Store) PruneScans(_ context.Context, assetID string, keep int) (int, error) {
+	if keep <= 0 {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var scans []model.Scan
+	for _, sc := range s.scans {
+		if sc.AssetID == assetID {
+			scans = append(scans, sc)
+		}
+	}
+	if len(scans) <= keep {
+		return 0, nil
+	}
+	sort.Slice(scans, func(i, j int) bool { return scans[i].CreatedAt.After(scans[j].CreatedAt) })
+	deleted := 0
+	for _, sc := range scans[keep:] {
+		delete(s.findings, sc.ID)
+		delete(s.scans, sc.ID)
+		deleted++
+	}
+	return deleted, nil
+}
+
 func (s *Store) GetSetting(_ context.Context, key string) (string, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

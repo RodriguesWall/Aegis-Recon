@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -170,6 +171,23 @@ func (s *Service) Run(ctx context.Context, scanID string) (err error) {
 	}
 	if s.tracker != nil {
 		s.tracker.Done(scanID)
+	}
+
+	// Retention: keep the newest N scans per asset (default 30; 0 = unlimited).
+	keep := 30
+	if v, ok, _ := s.store.GetSetting(ctx, "retention_keep"); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			keep = n
+		}
+	}
+	if keep > 0 {
+		if n, err := s.store.PruneScans(ctx, scan.AssetID, keep); err != nil {
+			if s.logger != nil {
+				s.logger.Error("prune scans", "asset", scan.AssetID, "err", err)
+			}
+		} else if n > 0 && s.logger != nil {
+			s.logger.Info("pruned old scans", "asset", scan.AssetID, "deleted", n, "keep", keep)
+		}
 	}
 
 	if s.logger != nil {
