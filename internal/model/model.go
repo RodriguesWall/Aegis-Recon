@@ -181,6 +181,27 @@ func (s TriageStatus) SuppressesNew() bool {
 	return s == TriageFalsePositive || s == TriageAcceptedRisk
 }
 
+// CurrentFinding is a finding from the latest completed scan of its asset,
+// tagged with its project. Used to build the aggregate dashboard snapshot.
+type CurrentFinding struct {
+	ProjectID   string
+	AssetID     string
+	Severity    Severity
+	Fingerprint string
+}
+
+// ScanSeverityPoint is one point on the severity trend: the per-severity finding
+// counts of a single completed scan.
+type ScanSeverityPoint struct {
+	ScanID      string    `json:"scan_id"`
+	CompletedAt time.Time `json:"completed_at"`
+	Critical    int       `json:"critical"`
+	High        int       `json:"high"`
+	Medium      int       `json:"medium"`
+	Low         int       `json:"low"`
+	Info        int       `json:"info"`
+}
+
 // Schedule drives automatic scans for one asset at a fixed interval. One per
 // asset (keyed by AssetID). A background ticker enqueues a scan when NextRun is
 // due, then advances NextRun by the interval.

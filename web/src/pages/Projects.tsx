@@ -3,17 +3,21 @@ import { useNavigate } from "react-router-dom"
 import { api } from "../api/client"
 import { CardMenu } from "../components/CardMenu"
 import { ConfirmDialog } from "../components/ConfirmDialog"
-import type { Project } from "../types"
+import { Dashboard } from "../components/Dashboard"
+import type { Project, Stats } from "../types"
 
 export function Projects() {
   const [projects, setProjects] = useState<Project[]>([])
+  const [stats, setStats] = useState<Stats | null>(null)
   const [name, setName] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(true)
 
   async function load() {
     try {
-      setProjects((await api.listProjects()) ?? [])
+      const [ps, st] = await Promise.all([api.listProjects(), api.getStats().catch(() => null)])
+      setProjects(ps ?? [])
+      setStats(st)
     } catch (e) {
       setError(String(e))
     } finally {
@@ -40,10 +44,12 @@ export function Projects() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl">
+      {stats && <Dashboard stats={stats} />}
+
+      <div className="pt-2">
+        <h2 className="text-2xl">
           <span className="gradient-text">Projects</span>
-        </h1>
+        </h2>
         <p className="text-muted">Register a project and its services to scan.</p>
       </div>
 

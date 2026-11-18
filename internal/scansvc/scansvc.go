@@ -15,6 +15,7 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/engine"
 	"github.com/RodriguesWall/aegis-recon/internal/model"
 	"github.com/RodriguesWall/aegis-recon/internal/progress"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/cdn"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/dns"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/fingerprint"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/httpprobe"
@@ -53,6 +54,7 @@ func New(st store.Store, tracker *progress.Tracker, logger *slog.Logger) *Servic
 			tlsscan.New(),
 			httpprobe.New(),
 			fingerprint.New(),
+			cdn.New(resolver),
 		},
 		discoverers:     []model.Discoverer{subdomain.New(resolver)},
 		nucleiBin:       envOr("AEGIS_NUCLEI_BIN", "nuclei"),

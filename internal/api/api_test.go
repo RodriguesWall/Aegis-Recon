@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/RodriguesWall/aegis-recon/internal/api"
 	"github.com/RodriguesWall/aegis-recon/internal/model"
@@ -228,6 +229,75 @@ func TestExportScan(t *testing.T) {
 	if w := do(t, h, "GET", "/api/scans/nope/export?format=sarif", ""); w.Code != http.StatusNotFound {
 		t.Errorf("missing scan: want 404, got %d", w.Code)
 	}
+}
+
+func TestStats(t *testing.T) {
+	st := memory.New()
+	q := queue.New(func(context.Context, string) error { return nil })
+	h := api.New(st, q, progress.New()).Routes()
+	ctx := context.Background()
+
+	_ = st.CreateProject(ctx, &model.Project{ID: "p1", Name: "Acme"})
+	_ = st.CreateAsset(ctx, &model.Asset{ID: "a1", ProjectID: "p1", Name: "acme.example", Type: model.AssetDomain})
+	// Older completed scan — must be ignored (only the latest per asset counts).
+	_ = st.CreateScan(ctx, &model.Scan{ID: "old", AssetID: "a1", Type: model.ScanSurface, Status: model.StatusCompleted, CreatedAt: time.Unix(100, 0)})
+	_ = st.SaveFindings(ctx, "old", []model.Finding{
+		{Scanner: "port", Target: model.Target{Host: "acme.example", Port: 21}, Severity: model.SeverityHigh, Title: "old"},
+	})
+	// Latest completed scan — the snapshot.
+	_ = st.CreateScan(ctx, &model.Scan{ID: "s1", AssetID: "a1", Type: model.ScanSurface, Status: model.StatusCompleted, CreatedAt: time.Unix(200, 0)})
+	fs := []model.Finding{
+		{Scanner: "httpprobe", Target: model.Target{Host: "acme.example", Port: 443}, Severity: model.SeverityCritical, Title: "admin exposed"},
+		{Scanner: "port", Target: model.Target{Host: "acme.example", Port: 3306}, Severity: model.SeverityHigh, Title: "mysql"},
+		{Scanner: "tls", Target: model.Target{Host: "acme.example", Port: 443}, Severity: model.SeverityMedium, Title: "weak tls"},
+	}
+	_ = st.SaveFindings(ctx, "s1", fs)
+	// Mark the mysql finding false-positive.
+	_ = st.SetTriage(ctx, &model.Triage{AssetID: "a1", Fingerprint: fs[1].Fingerprint(), Status: model.TriageFalsePositive})
+
+	w := do(t, h, "GET", "/api/stats", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("stats: %d %s", w.Code, w.Body)
+	}
+	var got struct {
+		Totals   map[string]int `json:"totals"`
+		Severity sevStub        `json:"severity"`
+		Triage struct {
+			Open          int `json:"open"`
+			FalsePositive int `json:"false_positive"`
+		} `json:"triage"`
+		Projects []struct {
+			Name  string `json:"name"`
+			Total int    `json:"total"`
+		} `json:"projects"`
+		Trend []struct {
+			ScanID string `json:"scan_id"`
+		} `json:"trend"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v\n%s", err, w.Body)
+	}
+	// Snapshot = latest scan only: 3 findings (not the old one).
+	if got.Totals["findings"] != 3 || got.Totals["projects"] != 1 || got.Totals["assets"] != 1 {
+		t.Fatalf("totals wrong: %+v", got.Totals)
+	}
+	if got.Severity.Critical != 1 || got.Severity.High != 1 || got.Severity.Medium != 1 {
+		t.Fatalf("severity wrong: %+v", got.Severity)
+	}
+	if got.Triage.FalsePositive != 1 || got.Triage.Open != 2 {
+		t.Fatalf("triage wrong: %+v", got.Triage)
+	}
+	if len(got.Projects) != 1 || got.Projects[0].Total != 3 {
+		t.Fatalf("projects wrong: %+v", got.Projects)
+	}
+	// Trend has both completed scans, oldest first.
+	if len(got.Trend) != 2 || got.Trend[0].ScanID != "old" || got.Trend[1].ScanID != "s1" {
+		t.Fatalf("trend wrong: %+v", got.Trend)
+	}
+}
+
+type sevStub struct {
+	Critical, High, Medium, Low, Info, Total int
 }
 
 func TestScanOnMissingAsset(t *testing.T) {

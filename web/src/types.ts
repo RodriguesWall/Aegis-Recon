@@ -65,6 +65,38 @@ export interface ScanResult {
   triage?: Record<string, Triage>
 }
 
+export interface SeverityCounts {
+  critical: number
+  high: number
+  medium: number
+  low: number
+  info: number
+  total: number
+}
+
+export interface ProjectStat extends SeverityCounts {
+  id: string
+  name: string
+}
+
+export interface TrendPoint {
+  scan_id: string
+  completed_at: string
+  critical: number
+  high: number
+  medium: number
+  low: number
+  info: number
+}
+
+export interface Stats {
+  totals: { projects: number; assets: number; findings: number }
+  severity: SeverityCounts
+  triage: { open: number; false_positive: number; accepted_risk: number; fixed: number }
+  projects: ProjectStat[]
+  trend: TrendPoint[]
+}
+
 export interface Schedule {
   asset_id: string
   interval_minutes: number

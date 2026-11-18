@@ -6,6 +6,7 @@ import type {
   ScanDiff,
   ScanResult,
   Schedule,
+  Stats,
   Triage,
   TriageStatus,
 } from "../types"
@@ -34,6 +35,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  getStats: () => req<Stats>("/stats"),
   listProjects: () => req<Project[]>("/projects"),
   createProject: (name: string) =>
     req<Project>("/projects", { method: "POST", body: JSON.stringify({ name }) }),

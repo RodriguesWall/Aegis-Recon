@@ -61,5 +61,14 @@ type Store interface {
 	// HasActiveScan reports whether the asset has a PENDING or PROCESSING scan.
 	HasActiveScan(ctx context.Context, assetID string) (bool, error)
 
+	// CurrentFindings returns the findings from the latest COMPLETED scan of each
+	// asset (the current exposure snapshot), tagged with project and asset.
+	CurrentFindings(ctx context.Context) ([]model.CurrentFinding, error)
+	// ListAllTriage returns every triage record across all assets.
+	ListAllTriage(ctx context.Context) ([]model.Triage, error)
+	// SeverityTrend returns the per-severity counts of the most recent COMPLETED
+	// scans, oldest first, capped at limit.
+	SeverityTrend(ctx context.Context, limit int) ([]model.ScanSeverityPoint, error)
+
 	Close() error
 }

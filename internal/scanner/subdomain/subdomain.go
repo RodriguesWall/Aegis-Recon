@@ -34,6 +34,22 @@ type Discoverer struct {
 	bruteConc   int
 	bruteCap    int
 	passiveOnly bool
+
+	// passive retry (crt.sh is slow and flaky).
+	attempts int
+	backoff  time.Duration
+
+	// last-good passive cache, keyed by domain. crt.sh returns nothing often
+	// enough that caching the last successful result keeps discovery stable
+	// across scans instead of collapsing to brute-only when crt.sh is down.
+	cacheMu  sync.Mutex
+	cache    map[string]cacheEntry
+	cacheTTL time.Duration
+}
+
+type cacheEntry struct {
+	hosts []string
+	at    time.Time
 }
 
 // Option configures the discoverer.
@@ -51,6 +67,25 @@ func WithBruteConcurrency(n int) Option { return func(d *Discoverer) { d.bruteCo
 // WithPassiveOnly disables the bruteforce pass.
 func WithPassiveOnly() Option { return func(d *Discoverer) { d.passiveOnly = true } }
 
+// WithRetries sets how many times the passive (crt.sh) fetch is attempted
+// before giving up (default 3). Values < 1 are ignored.
+func WithRetries(n int) Option {
+	return func(d *Discoverer) {
+		if n >= 1 {
+			d.attempts = n
+		}
+	}
+}
+
+// WithBackoff sets the delay between passive attempts (default 2s). Tests set 0.
+func WithBackoff(dly time.Duration) Option {
+	return func(d *Discoverer) {
+		if dly >= 0 {
+			d.backoff = dly
+		}
+	}
+}
+
 // crtShURL is a variable so tests can point it at a fake server.
 var crtShURL = "https://crt.sh/"
 
@@ -61,12 +96,17 @@ func New(r model.Resolver, opts ...Option) *Discoverer {
 		words:     defaultWords,
 		bruteConc: 20,
 		bruteCap:  2000,
+		attempts:  3,
+		backoff:   2 * time.Second,
+		cache:     map[string]cacheEntry{},
+		cacheTTL:  7 * 24 * time.Hour,
 	}
 	for _, o := range opts {
 		o(d)
 	}
 	if d.client == nil {
-		d.client = &http.Client{Timeout: 15 * time.Second}
+		// crt.sh is slow; 30s per attempt, retried a few times (see passive).
+		d.client = &http.Client{Timeout: 30 * time.Second}
 	}
 	return d
 }
@@ -96,7 +136,18 @@ func (d *Discoverer) Discover(ctx context.Context, domain string) ([]string, err
 		mu.Unlock()
 	}
 
-	passiveErr := d.passive(ctx, domain, add)
+	names, passiveErr := d.passiveWithRetry(ctx, domain)
+	if passiveErr == nil && len(names) > 0 {
+		d.cacheStore(domain, names)
+	} else if cached := d.cacheGet(domain); len(cached) > 0 {
+		// crt.sh failed or returned nothing: fall back to the last good set so
+		// discovery doesn't collapse to brute-only (which drops most hosts).
+		names = cached
+	}
+	for _, n := range names {
+		add(n)
+	}
+
 	if !d.passiveOnly {
 		d.brute(ctx, domain, add)
 	}
@@ -112,6 +163,43 @@ func (d *Discoverer) Discover(ctx context.Context, domain string) ([]string, err
 	return out, nil
 }
 
+// passiveWithRetry runs passive up to d.attempts times with d.backoff between
+// tries, since crt.sh is slow and intermittently unavailable.
+func (d *Discoverer) passiveWithRetry(ctx context.Context, domain string) ([]string, error) {
+	var lastErr error
+	for i := 0; i < d.attempts; i++ {
+		if i > 0 && d.backoff > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(d.backoff):
+			}
+		}
+		names, err := d.passive(ctx, domain)
+		if err == nil {
+			return names, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+func (d *Discoverer) cacheStore(domain string, hosts []string) {
+	d.cacheMu.Lock()
+	defer d.cacheMu.Unlock()
+	d.cache[domain] = cacheEntry{hosts: append([]string(nil), hosts...), at: time.Now()}
+}
+
+func (d *Discoverer) cacheGet(domain string) []string {
+	d.cacheMu.Lock()
+	defer d.cacheMu.Unlock()
+	e, ok := d.cache[domain]
+	if !ok || (d.cacheTTL > 0 && time.Since(e.at) > d.cacheTTL) {
+		return nil
+	}
+	return append([]string(nil), e.hosts...)
+}
+
 // crtEntry is one record from the crt.sh JSON output.
 type crtEntry struct {
 	NameValue string `json:"name_value"`
@@ -119,7 +207,7 @@ type crtEntry struct {
 
 // passive queries crt.sh Certificate Transparency logs. It touches crt.sh, not
 // the target.
-func (d *Discoverer) passive(ctx context.Context, domain string, add func(string)) error {
+func (d *Discoverer) passive(ctx context.Context, domain string) ([]string, error) {
 	q := url.Values{}
 	q.Set("q", "%."+domain)
 	q.Set("output", "json")
@@ -127,30 +215,29 @@ func (d *Discoverer) passive(ctx context.Context, domain string, add func(string
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return fmt.Errorf("subdomain: build crt.sh request: %w", err)
+		return nil, fmt.Errorf("subdomain: build crt.sh request: %w", err)
 	}
 	req.Header.Set("User-Agent", "Aegis-Recon/0.1 (+authorized-use-only)")
 
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("subdomain: crt.sh: %w", err)
+		return nil, fmt.Errorf("subdomain: crt.sh: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("subdomain: crt.sh status %d", resp.StatusCode)
+		return nil, fmt.Errorf("subdomain: crt.sh status %d", resp.StatusCode)
 	}
 
 	var entries []crtEntry
 	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
-		return fmt.Errorf("subdomain: decode crt.sh: %w", err)
+		return nil, fmt.Errorf("subdomain: decode crt.sh: %w", err)
 	}
+	var names []string
 	for _, e := range entries {
 		// name_value may hold several names separated by newlines.
-		for _, name := range strings.Split(e.NameValue, "\n") {
-			add(name)
-		}
+		names = append(names, strings.Split(e.NameValue, "\n")...)
 	}
-	return nil
+	return names, nil
 }
 
 // brute resolves word.domain for each word, keeping only names that resolve.

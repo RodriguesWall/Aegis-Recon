@@ -106,6 +106,47 @@ func TestSQLite_Triage(t *testing.T) {
 	}
 }
 
+func TestSQLite_StatsAggregation(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	now := time.Now()
+	st.CreateProject(ctx, &model.Project{ID: "p1", Name: "P", CreatedAt: now})
+	st.CreateAsset(ctx, &model.Asset{ID: "a1", ProjectID: "p1", Type: model.AssetDomain, Name: "example.com", CreatedAt: now})
+	end := now.Add(10 * time.Second)
+	st.CreateScan(ctx, &model.Scan{ID: "s1", AssetID: "a1", Type: model.ScanSurface, Status: model.StatusCompleted, CreatedAt: now, CompletedAt: &end})
+	st.SaveFindings(ctx, "s1", []model.Finding{
+		{Scanner: "port", Target: model.Target{Host: "example.com", Port: 3306}, Severity: model.SeverityHigh, Title: "mysql"},
+		{Scanner: "tls", Target: model.Target{Host: "example.com", Port: 443}, Severity: model.SeverityMedium, Title: "weak"},
+	})
+
+	// SeverityTrend must not error (regression: COALESCE broke time scanning).
+	trend, err := st.SeverityTrend(ctx, 30)
+	if err != nil {
+		t.Fatalf("SeverityTrend: %v", err)
+	}
+	if len(trend) != 1 || trend[0].High != 1 || trend[0].Medium != 1 {
+		t.Fatalf("trend wrong: %+v", trend)
+	}
+	if trend[0].CompletedAt.IsZero() {
+		t.Fatalf("trend completed_at not populated")
+	}
+
+	cur, err := st.CurrentFindings(ctx)
+	if err != nil {
+		t.Fatalf("CurrentFindings: %v", err)
+	}
+	if len(cur) != 2 || cur[0].ProjectID != "p1" {
+		t.Fatalf("current findings wrong: %+v", cur)
+	}
+}
+
 func TestSQLite_DeleteProjectCascade(t *testing.T) {
 	ctx := context.Background()
 	st, err := sqlite.Open(":memory:")

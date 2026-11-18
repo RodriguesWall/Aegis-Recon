@@ -37,6 +37,7 @@ func New(st store.Store, q *queue.Queue, tracker *progress.Tracker) *Server {
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
+	mux.HandleFunc("GET /api/stats", s.stats)
 	mux.HandleFunc("POST /api/projects", s.createProject)
 	mux.HandleFunc("GET /api/projects", s.listProjects)
 	mux.HandleFunc("PATCH /api/projects/{id}", s.updateProject)
@@ -562,6 +563,125 @@ func (s *Server) deleteScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type sevCounts struct {
+	Critical int `json:"critical"`
+	High     int `json:"high"`
+	Medium   int `json:"medium"`
+	Low      int `json:"low"`
+	Info     int `json:"info"`
+	Total    int `json:"total"`
+}
+
+func (c *sevCounts) add(sev model.Severity) {
+	switch sev {
+	case model.SeverityCritical:
+		c.Critical++
+	case model.SeverityHigh:
+		c.High++
+	case model.SeverityMedium:
+		c.Medium++
+	case model.SeverityLow:
+		c.Low++
+	case model.SeverityInfo:
+		c.Info++
+	}
+	c.Total++
+}
+
+// stats builds the aggregate dashboard: current exposure (latest completed scan
+// per asset) by severity and per project, triage breakdown, and a severity
+// trend over the most recent completed scans.
+func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	projects, err := s.store.ListProjects(ctx)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	current, err := s.store.CurrentFindings(ctx)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	triage, err := s.store.ListAllTriage(ctx)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	trend, err := s.store.SeverityTrend(ctx, 30)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Triage index keyed by assetID + "\x00" + fingerprint.
+	tri := make(map[string]model.TriageStatus, len(triage))
+	for _, t := range triage {
+		tri[t.AssetID+"\x00"+t.Fingerprint] = t.Status
+	}
+
+	type projStat struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		sevCounts
+	}
+	perProject := map[string]*projStat{}
+	names := map[string]string{}
+	for _, p := range projects {
+		names[p.ID] = p.Name
+		perProject[p.ID] = &projStat{ID: p.ID, Name: p.Name}
+	}
+
+	assetCount := 0
+	for _, p := range projects {
+		if as, err := s.store.ListAssets(ctx, p.ID); err == nil {
+			assetCount += len(as)
+		}
+	}
+
+	var overall sevCounts
+	triageCounts := struct {
+		Open          int `json:"open"`
+		FalsePositive int `json:"false_positive"`
+		AcceptedRisk  int `json:"accepted_risk"`
+		Fixed         int `json:"fixed"`
+	}{}
+
+	for _, cf := range current {
+		overall.add(cf.Severity)
+		if ps := perProject[cf.ProjectID]; ps != nil {
+			ps.add(cf.Severity)
+		}
+		switch tri[cf.AssetID+"\x00"+cf.Fingerprint] {
+		case model.TriageFalsePositive:
+			triageCounts.FalsePositive++
+		case model.TriageAcceptedRisk:
+			triageCounts.AcceptedRisk++
+		case model.TriageFixed:
+			triageCounts.Fixed++
+		default:
+			triageCounts.Open++
+		}
+	}
+
+	projList := make([]*projStat, 0, len(projects))
+	for _, p := range projects {
+		projList = append(projList, perProject[p.ID])
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"totals": map[string]int{
+			"projects": len(projects),
+			"assets":   assetCount,
+			"findings": overall.Total,
+		},
+		"severity": overall,
+		"triage":   triageCounts,
+		"projects": projList,
+		"trend":    trend,
+	})
 }
 
 // ---- helpers ----
