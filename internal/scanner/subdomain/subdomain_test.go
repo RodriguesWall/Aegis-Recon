@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
 
@@ -57,6 +58,71 @@ func TestDiscover_PassiveAndBrute(t *testing.T) {
 	}
 	if got["doesnotexist.example.com"] {
 		t.Errorf("non-resolving brute host should be dropped")
+	}
+}
+
+func TestPassive_RetryThenSuccess(t *testing.T) {
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) < 3 { // fail the first two attempts
+			http.Error(w, "boom", http.StatusBadGateway)
+			return
+		}
+		_, _ = w.Write([]byte(`[{"name_value":"api.example.com"}]`))
+	}))
+	defer ts.Close()
+	old := crtShURL
+	crtShURL = ts.URL
+	defer func() { crtShURL = old }()
+
+	d := New(fakeResolver{}, WithClient(ts.Client()), WithPassiveOnly(),
+		WithRetries(3), WithBackoff(0))
+	hosts, err := d.Discover(context.Background(), "example.com")
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if calls.Load() != 3 {
+		t.Fatalf("expected 3 attempts, got %d", calls.Load())
+	}
+	if len(hosts) != 1 || hosts[0] != "api.example.com" {
+		t.Fatalf("hosts = %v, want [api.example.com]", hosts)
+	}
+}
+
+func TestPassive_CacheFallback(t *testing.T) {
+	var fail atomic.Bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail.Load() {
+			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte(`[{"name_value":"api.example.com\nmail.example.com"}]`))
+	}))
+	defer ts.Close()
+	old := crtShURL
+	crtShURL = ts.URL
+	defer func() { crtShURL = old }()
+
+	d := New(fakeResolver{}, WithClient(ts.Client()), WithPassiveOnly(),
+		WithRetries(2), WithBackoff(0))
+
+	// First scan succeeds and populates the cache.
+	if _, err := d.Discover(context.Background(), "example.com"); err != nil {
+		t.Fatalf("first discover: %v", err)
+	}
+
+	// crt.sh now down: discovery must fall back to the cached passive set.
+	fail.Store(true)
+	hosts, err := d.Discover(context.Background(), "example.com")
+	if err != nil {
+		t.Fatalf("second discover should use cache, got err: %v", err)
+	}
+	got := map[string]bool{}
+	for _, h := range hosts {
+		got[h] = true
+	}
+	if !got["api.example.com"] || !got["mail.example.com"] {
+		t.Fatalf("cache fallback missing hosts: %v", hosts)
 	}
 }
 
