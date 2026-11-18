@@ -18,6 +18,7 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/cdn"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/dns"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/emailposture"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/fingerprint"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/httpprobe"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/nuclei"
@@ -144,6 +145,9 @@ func (s *Service) Run(ctx context.Context, scanID string) (err error) {
 	result := eng.RunPipeline(ctx, domain, s.discoverers, sc.Filter)
 
 	findings := result.Findings
+	// Domain-level email posture (SPF/DMARC/DKIM): checked once on the root
+	// domain, not per host.
+	findings = append(findings, emailposture.Check(ctx, domain, s.resolver)...)
 	if !scan.IncludeInfo {
 		findings = dropInfo(findings)
 	}
