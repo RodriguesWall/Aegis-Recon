@@ -556,7 +556,7 @@ func (s *Store) ListAllTriage(ctx context.Context) ([]model.Triage, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) SeverityTrend(ctx context.Context, limit int) ([]model.ScanSeverityPoint, error) {
+func (s *Store) SeverityTrend(ctx context.Context, projectID, assetID string, limit int) ([]model.ScanSeverityPoint, error) {
 	if limit <= 0 {
 		limit = 30
 	}
@@ -568,11 +568,14 @@ func (s *Store) SeverityTrend(ctx context.Context, limit int) ([]model.ScanSever
 		        SUM(CASE f.severity WHEN 'low'      THEN 1 ELSE 0 END),
 		        SUM(CASE f.severity WHEN 'info'     THEN 1 ELSE 0 END)
 		 FROM scans sc
+		 JOIN assets a ON a.id = sc.asset_id
 		 LEFT JOIN findings f ON f.scan_id = sc.id
 		 WHERE sc.status = 'COMPLETED'
+		   AND (? = '' OR a.project_id = ?)
+		   AND (? = '' OR sc.asset_id = ?)
 		 GROUP BY sc.id
 		 ORDER BY COALESCE(sc.completed_at, sc.created_at) DESC
-		 LIMIT ?`, limit)
+		 LIMIT ?`, projectID, projectID, assetID, assetID, limit)
 	if err != nil {
 		return nil, err
 	}

@@ -36,7 +36,13 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  getStats: () => req<Stats>("/stats"),
+  getStats: (projectID = "", assetID = "") => {
+    const q = new URLSearchParams()
+    if (projectID) q.set("project", projectID)
+    if (assetID) q.set("asset", assetID)
+    const qs = q.toString()
+    return req<Stats>("/stats" + (qs ? "?" + qs : ""))
+  },
   getSettings: () => req<SettingsData>("/settings"),
   updateSettings: (body: Record<string, string>) =>
     req<SettingsData>("/settings", { method: "PUT", body: JSON.stringify(body) }),

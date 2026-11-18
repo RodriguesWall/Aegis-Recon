@@ -267,10 +267,11 @@ func TestStats(t *testing.T) {
 			Open          int `json:"open"`
 			FalsePositive int `json:"false_positive"`
 		} `json:"triage"`
-		Projects []struct {
+		BreakdownBy string `json:"breakdown_by"`
+		Breakdown   []struct {
 			Name  string `json:"name"`
 			Total int    `json:"total"`
-		} `json:"projects"`
+		} `json:"breakdown"`
 		Trend []struct {
 			ScanID string `json:"scan_id"`
 		} `json:"trend"`
@@ -288,8 +289,8 @@ func TestStats(t *testing.T) {
 	if got.Triage.FalsePositive != 1 || got.Triage.Open != 2 {
 		t.Fatalf("triage wrong: %+v", got.Triage)
 	}
-	if len(got.Projects) != 1 || got.Projects[0].Total != 3 {
-		t.Fatalf("projects wrong: %+v", got.Projects)
+	if got.BreakdownBy != "project" || len(got.Breakdown) != 1 || got.Breakdown[0].Total != 3 {
+		t.Fatalf("breakdown wrong: by=%q %+v", got.BreakdownBy, got.Breakdown)
 	}
 	// Trend has both completed scans, oldest first.
 	if len(got.Trend) != 2 || got.Trend[0].ScanID != "old" || got.Trend[1].ScanID != "s1" {

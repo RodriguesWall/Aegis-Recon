@@ -1,6 +1,13 @@
-import type { Stats } from "../types"
+import { useEffect, useState } from "react"
+import { api } from "../api/client"
+import type { Asset, Project, Stats } from "../types"
 import { SeverityBadge } from "./SeverityBadge"
 import { TrendChart } from "./TrendChart"
+
+export interface DashFilter {
+  projectID: string
+  assetID: string
+}
 
 function Kpi({ label, value }: { label: string; value: number }) {
   return (
@@ -11,11 +18,33 @@ function Kpi({ label, value }: { label: string; value: number }) {
   )
 }
 
-// Dashboard: a compact aggregate of the current security posture, shown above
-// the project list on the home page.
-export function Dashboard({ stats }: { stats: Stats }) {
+// Dashboard: a compact aggregate of the current security posture, with a
+// project → service filter. Shown above the project list on the home page.
+export function Dashboard({
+  stats,
+  projects,
+  filter,
+  onFilter,
+}: {
+  stats: Stats
+  projects: Project[]
+  filter: DashFilter
+  onFilter: (f: DashFilter) => void
+}) {
   const sev = stats.severity
   const t = stats.triage
+  const [assets, setAssets] = useState<Asset[]>([])
+
+  useEffect(() => {
+    if (!filter.projectID) {
+      setAssets([])
+      return
+    }
+    void api
+      .listAssets(filter.projectID)
+      .then((as) => setAssets(as ?? []))
+      .catch(() => setAssets([]))
+  }, [filter.projectID])
 
   return (
     <div className="space-y-4">
@@ -23,10 +52,38 @@ export function Dashboard({ stats }: { stats: Stats }) {
         <h1 className="text-2xl">
           <span className="gradient-text">Overview</span>
         </h1>
-        <p className="text-sm text-muted">Current exposure across all projects (latest scan per service).</p>
+        <p className="text-sm text-muted">Current exposure (latest scan per service).</p>
       </div>
 
-      {/* KPIs + severity on one compact band */}
+      {/* Filters: project → service */}
+      <div className="flex flex-wrap gap-2">
+        <select
+          className="input w-auto"
+          value={filter.projectID}
+          onChange={(e) => onFilter({ projectID: e.target.value, assetID: "" })}
+        >
+          <option value="">All projects</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <select
+          className="input w-auto"
+          value={filter.assetID}
+          disabled={!filter.projectID}
+          onChange={(e) => onFilter({ projectID: filter.projectID, assetID: e.target.value })}
+        >
+          <option value="">All services</option>
+          {assets.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <div className="glass-card flex flex-wrap items-center gap-x-6 gap-y-3 py-4">
         <Kpi label="Projects" value={stats.totals.projects} />
         <Kpi label="Services" value={stats.totals.assets} />
@@ -55,19 +112,21 @@ export function Dashboard({ stats }: { stats: Stats }) {
           <Row label="Fixed" value={t.fixed} color="text-sev-info" />
         </div>
 
-        {stats.projects.length > 0 && (
+        {stats.breakdown_by !== "" && stats.breakdown.length > 0 && (
           <>
-            <p className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-muted">By project</p>
+            <p className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-muted">
+              {stats.breakdown_by === "asset" ? "By service" : "By project"}
+            </p>
             <div className="space-y-1.5">
-              {stats.projects.map((p) => (
-                <div key={p.id} className="flex items-center justify-between gap-2 text-xs">
-                  <span className="truncate text-white">{p.name}</span>
+              {stats.breakdown.map((g) => (
+                <div key={g.id} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="truncate text-white">{g.name}</span>
                   <span className="flex items-center gap-2">
-                    <Count n={p.critical} color="#f87171" title="Critical" />
-                    <Count n={p.high} color="#fb923c" title="High" />
-                    <Count n={p.medium} color="#facc15" title="Medium" />
-                    <Count n={p.low} color="#60a5fa" title="Low" />
-                    <span className="text-muted">{p.total}</span>
+                    <Count n={g.critical} color="#f87171" title="Critical" />
+                    <Count n={g.high} color="#fb923c" title="High" />
+                    <Count n={g.medium} color="#facc15" title="Medium" />
+                    <Count n={g.low} color="#60a5fa" title="Low" />
+                    <span className="text-muted">{g.total}</span>
                   </span>
                 </div>
               ))}

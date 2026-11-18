@@ -372,7 +372,7 @@ func (s *Store) ListAllTriage(_ context.Context) ([]model.Triage, error) {
 	return out, nil
 }
 
-func (s *Store) SeverityTrend(_ context.Context, limit int) ([]model.ScanSeverityPoint, error) {
+func (s *Store) SeverityTrend(_ context.Context, projectID, assetID string, limit int) ([]model.ScanSeverityPoint, error) {
 	if limit <= 0 {
 		limit = 30
 	}
@@ -381,6 +381,12 @@ func (s *Store) SeverityTrend(_ context.Context, limit int) ([]model.ScanSeverit
 	var pts []model.ScanSeverityPoint
 	for _, sc := range s.scans {
 		if sc.Status != model.StatusCompleted {
+			continue
+		}
+		if assetID != "" && sc.AssetID != assetID {
+			continue
+		}
+		if projectID != "" && s.assets[sc.AssetID].ProjectID != projectID {
 			continue
 		}
 		at := sc.CreatedAt

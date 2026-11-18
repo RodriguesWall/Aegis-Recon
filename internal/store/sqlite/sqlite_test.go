@@ -127,7 +127,7 @@ func TestSQLite_StatsAggregation(t *testing.T) {
 	})
 
 	// SeverityTrend must not error (regression: COALESCE broke time scanning).
-	trend, err := st.SeverityTrend(ctx, 30)
+	trend, err := st.SeverityTrend(ctx, "", "", 30)
 	if err != nil {
 		t.Fatalf("SeverityTrend: %v", err)
 	}

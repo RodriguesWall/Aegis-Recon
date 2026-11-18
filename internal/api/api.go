@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -594,11 +595,22 @@ func (c *sevCounts) add(sev model.Severity) {
 	c.Total++
 }
 
-// stats builds the aggregate dashboard: current exposure (latest completed scan
-// per asset) by severity and per project, triage breakdown, and a severity
-// trend over the most recent completed scans.
+// grpItem is one breakdown row (a project or a service) with its severity counts.
+type grpItem struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	sevCounts
+}
+
+// stats builds the aggregate dashboard. Optional query params scope it:
+// ?project=<id> drills into one project (breakdown becomes per-service), and
+// ?asset=<id> drills into one service. Snapshot, triage and trend all honor the
+// scope.
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	projectID := r.URL.Query().Get("project")
+	assetID := r.URL.Query().Get("asset")
+
 	projects, err := s.store.ListProjects(ctx)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -614,34 +626,37 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	trend, err := s.store.SeverityTrend(ctx, 30)
+	trend, err := s.store.SeverityTrend(ctx, projectID, assetID, 30)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// Triage index keyed by assetID + "\x00" + fingerprint.
 	tri := make(map[string]model.TriageStatus, len(triage))
 	for _, t := range triage {
 		tri[t.AssetID+"\x00"+t.Fingerprint] = t.Status
 	}
 
-	type projStat struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-		sevCounts
+	// Breakdown dimension: no project → per project; a project → per service; a
+	// single service → no breakdown.
+	breakdownBy := "project"
+	if projectID != "" {
+		breakdownBy = "asset"
 	}
-	perProject := map[string]*projStat{}
-	names := map[string]string{}
-	for _, p := range projects {
-		names[p.ID] = p.Name
-		perProject[p.ID] = &projStat{ID: p.ID, Name: p.Name}
+	if assetID != "" {
+		breakdownBy = ""
 	}
 
-	assetCount := 0
-	for _, p := range projects {
-		if as, err := s.store.ListAssets(ctx, p.ID); err == nil {
-			assetCount += len(as)
+	groups := map[string]*grpItem{}
+	if breakdownBy == "project" {
+		for _, p := range projects {
+			groups[p.ID] = &grpItem{ID: p.ID, Name: p.Name}
+		}
+	} else if breakdownBy == "asset" {
+		if as, err := s.store.ListAssets(ctx, projectID); err == nil {
+			for _, a := range as {
+				groups[a.ID] = &grpItem{ID: a.ID, Name: a.Name}
+			}
 		}
 	}
 
@@ -654,9 +669,21 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	}{}
 
 	for _, cf := range current {
+		if projectID != "" && cf.ProjectID != projectID {
+			continue
+		}
+		if assetID != "" && cf.AssetID != assetID {
+			continue
+		}
 		overall.add(cf.Severity)
-		if ps := perProject[cf.ProjectID]; ps != nil {
-			ps.add(cf.Severity)
+		if breakdownBy == "project" {
+			if g := groups[cf.ProjectID]; g != nil {
+				g.add(cf.Severity)
+			}
+		} else if breakdownBy == "asset" {
+			if g := groups[cf.AssetID]; g != nil {
+				g.add(cf.Severity)
+			}
 		}
 		switch tri[cf.AssetID+"\x00"+cf.Fingerprint] {
 		case model.TriageFalsePositive:
@@ -670,9 +697,27 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	projList := make([]*projStat, 0, len(projects))
-	for _, p := range projects {
-		projList = append(projList, perProject[p.ID])
+	breakdown := make([]*grpItem, 0, len(groups))
+	for _, g := range groups {
+		breakdown = append(breakdown, g)
+	}
+	sort.Slice(breakdown, func(i, j int) bool { return breakdown[i].Name < breakdown[j].Name })
+
+	// Assets in scope.
+	assetCount := 0
+	switch {
+	case assetID != "":
+		assetCount = 1
+	case projectID != "":
+		if as, err := s.store.ListAssets(ctx, projectID); err == nil {
+			assetCount = len(as)
+		}
+	default:
+		for _, p := range projects {
+			if as, err := s.store.ListAssets(ctx, p.ID); err == nil {
+				assetCount += len(as)
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -681,10 +726,11 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 			"assets":   assetCount,
 			"findings": overall.Total,
 		},
-		"severity": overall,
-		"triage":   triageCounts,
-		"projects": projList,
-		"trend":    trend,
+		"severity":     overall,
+		"triage":       triageCounts,
+		"breakdown_by": breakdownBy,
+		"breakdown":    breakdown,
+		"trend":        trend,
 	})
 }
 

@@ -67,8 +67,9 @@ type Store interface {
 	// ListAllTriage returns every triage record across all assets.
 	ListAllTriage(ctx context.Context) ([]model.Triage, error)
 	// SeverityTrend returns the per-severity counts of the most recent COMPLETED
-	// scans, oldest first, capped at limit.
-	SeverityTrend(ctx context.Context, limit int) ([]model.ScanSeverityPoint, error)
+	// scans, oldest first, capped at limit. projectID/assetID scope the trend
+	// (empty = no filter on that dimension).
+	SeverityTrend(ctx context.Context, projectID, assetID string, limit int) ([]model.ScanSeverityPoint, error)
 
 	// GetSetting returns one app setting's value (found=false when absent).
 	GetSetting(ctx context.Context, key string) (value string, found bool, err error)

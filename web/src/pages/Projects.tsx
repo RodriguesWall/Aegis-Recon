@@ -3,21 +3,20 @@ import { useNavigate } from "react-router-dom"
 import { api } from "../api/client"
 import { CardMenu } from "../components/CardMenu"
 import { ConfirmDialog } from "../components/ConfirmDialog"
-import { Dashboard } from "../components/Dashboard"
+import { Dashboard, type DashFilter } from "../components/Dashboard"
 import type { Project, Stats } from "../types"
 
 export function Projects() {
   const [projects, setProjects] = useState<Project[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
+  const [filter, setFilter] = useState<DashFilter>({ projectID: "", assetID: "" })
   const [name, setName] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(true)
 
   async function load() {
     try {
-      const [ps, st] = await Promise.all([api.listProjects(), api.getStats().catch(() => null)])
-      setProjects(ps ?? [])
-      setStats(st)
+      setProjects((await api.listProjects()) ?? [])
     } catch (e) {
       setError(String(e))
     } finally {
@@ -25,9 +24,19 @@ export function Projects() {
     }
   }
 
+  async function loadStats() {
+    setStats(await api.getStats(filter.projectID, filter.assetID).catch(() => null))
+  }
+
   useEffect(() => {
     void load()
   }, [])
+
+  // Refetch the dashboard whenever the project→service filter changes.
+  useEffect(() => {
+    void loadStats()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter])
 
   async function create(e: React.FormEvent) {
     e.preventDefault()
@@ -82,7 +91,7 @@ export function Projects() {
       {/* Right (~40%): aggregate dashboard, sticky alongside the list. */}
       {stats && (
         <div className="mt-8 lg:mt-0 lg:sticky lg:top-20">
-          <Dashboard stats={stats} />
+          <Dashboard stats={stats} projects={projects} filter={filter} onFilter={setFilter} />
         </div>
       )}
     </div>

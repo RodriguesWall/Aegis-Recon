@@ -93,7 +93,8 @@ export interface Stats {
   totals: { projects: number; assets: number; findings: number }
   severity: SeverityCounts
   triage: { open: number; false_positive: number; accepted_risk: number; fixed: number }
-  projects: ProjectStat[]
+  breakdown_by: string // "project" | "asset" | ""
+  breakdown: ProjectStat[]
   trend: TrendPoint[]
 }
 
