@@ -240,12 +240,18 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "asset not found")
 		return
 	}
-	// Options are optional; default (no body) means exclude Info findings.
+	// Options are optional; default (no body) means exclude Info findings and
+	// run nuclei. use_nuclei is a pointer so an omitted field defaults to true.
 	var in struct {
-		IncludeInfo bool `json:"include_info"`
+		IncludeInfo bool  `json:"include_info"`
+		UseNuclei   *bool `json:"use_nuclei"`
 	}
 	if r.ContentLength != 0 && r.Body != nil {
 		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in)
+	}
+	useNuclei := true
+	if in.UseNuclei != nil {
+		useNuclei = *in.UseNuclei
 	}
 	scan := &model.Scan{
 		ID:          uuid.NewString(),
@@ -253,6 +259,7 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 		Type:        model.ScanSurface,
 		Status:      model.StatusPending,
 		IncludeInfo: in.IncludeInfo,
+		UseNuclei:   useNuclei,
 		CreatedAt:   time.Now().UTC(),
 	}
 	if err := s.store.CreateScan(r.Context(), scan); err != nil {

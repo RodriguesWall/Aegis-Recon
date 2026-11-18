@@ -1,29 +1,59 @@
-# Multi-stage build of the aegisd API. modernc.org/sqlite is pure Go, so the
-# binary builds static with CGO disabled and runs on distroless.
+# Multi-stage build of the aegisd API. modernc.org/sqlite is pure Go, so aegisd
+# itself builds static with CGO disabled. The final image is Alpine (not
+# distroless) because it bundles the external `nuclei` binary and its templates
+# for the optional active vulnerability checks (V2 feature 4).
 FROM golang:1.26 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-# Version is passed in from compose (git has been excluded from the build
-# context, so `git describe` can't run here). Defaults to "dev".
+# Version is passed in from compose (git is excluded from the build context, so
+# `git describe` can't run here). Defaults to "dev".
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
     -ldflags "-X github.com/RodriguesWall/aegis-recon/internal/version.Version=${VERSION}" \
     -o /out/aegisd ./cmd/aegisd
-# Pre-create the data dir owned by the distroless nonroot UID (65532). A fresh
-# named volume inherits this ownership on first mount, so aegisd (nonroot) can
-# write the SQLite file. Without it: SQLITE_CANTOPEN (error 14).
-RUN mkdir -p /data && chown 65532:65532 /data
 
-FROM gcr.io/distroless/static-debian12:nonroot
+# Fetch a pinned nuclei release for the target arch and pre-download its
+# templates, so the running container needs no network to scan.
+FROM alpine:3.21 AS nuclei
+ARG TARGETARCH
+ARG NUCLEI_VERSION=3.3.9
+RUN apk add --no-cache curl unzip ca-certificates \
+ && case "${TARGETARCH:-amd64}" in \
+        arm64) nsuffix=arm64 ;; \
+        *)     nsuffix=amd64 ;; \
+    esac \
+ && curl -fsSL -o /tmp/nuclei.zip \
+      "https://github.com/projectdiscovery/nuclei/releases/download/v${NUCLEI_VERSION}/nuclei_${NUCLEI_VERSION}_linux_${nsuffix}.zip" \
+ && unzip -q /tmp/nuclei.zip -d /tmp/nuclei \
+ && install -m 0755 /tmp/nuclei/nuclei /usr/local/bin/nuclei \
+ && rm -rf /tmp/nuclei /tmp/nuclei.zip
+# Pre-fetch templates into a fixed directory baked into the image. mkdir first
+# so the COPY target always exists even if the fetch is unavailable. Flags:
+# -ut updates templates, -ud is the custom install directory.
+RUN mkdir -p /opt/nuclei-templates \
+ && nuclei -ut -ud /opt/nuclei-templates \
+ && echo "nuclei templates installed: $(find /opt/nuclei-templates -name '*.yaml' | wc -l) files"
+
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates \
+ && adduser -D -u 65532 aegis
 COPY --from=build /out/aegisd /aegisd
-COPY --from=build --chown=65532:65532 /data /data
+COPY --from=nuclei /usr/local/bin/nuclei /usr/local/bin/nuclei
+COPY --from=nuclei --chown=65532:65532 /opt/nuclei-templates /home/aegis/nuclei-templates
+# Data dir owned by the nonroot UID; a fresh named volume inherits this on first
+# mount so aegisd can write the SQLite file (else SQLITE_CANTOPEN, error 14).
+RUN mkdir -p /data && chown 65532:65532 /data
+USER 65532
 EXPOSE 8080
-ENV AEGIS_ADDR=0.0.0.0:8080 \
-    AEGIS_DB=/data/aegis.db
+ENV HOME=/home/aegis \
+    AEGIS_ADDR=0.0.0.0:8080 \
+    AEGIS_DB=/data/aegis.db \
+    AEGIS_NUCLEI_BIN=nuclei \
+    AEGIS_NUCLEI_TEMPLATES=/home/aegis/nuclei-templates
 VOLUME /data
-# Self-check via the binary itself (distroless has no shell/curl).
+# Self-check via the binary itself.
 HEALTHCHECK --interval=10s --timeout=4s --start-period=5s --retries=5 \
     CMD ["/aegisd", "-health"]
 ENTRYPOINT ["/aegisd"]

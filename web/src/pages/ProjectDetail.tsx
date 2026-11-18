@@ -118,6 +118,7 @@ function AssetCard({
   const [scheduleOpen, setScheduleOpen] = useState(false)
   const [scanToDelete, setScanToDelete] = useState<string | null>(null)
   const [includeInfo, setIncludeInfo] = useState(false)
+  const [useNuclei, setUseNuclei] = useState(true)
 
   async function save() {
     const n = draft.trim()
@@ -131,7 +132,7 @@ function AssetCard({
   }
 
   async function runScan() {
-    const scan = await api.createScan(asset.id, includeInfo)
+    const scan = await api.createScan(asset.id, includeInfo, useNuclei)
     navigate(`/scans/${scan.id}`)
   }
 
@@ -186,6 +187,14 @@ function AssetCard({
           onChange={(e) => setIncludeInfo(e.target.checked)}
         />
         Include informational findings (Info) — dns/ports/tls inventory
+      </label>
+      <label className="mt-1 flex items-center gap-2 text-xs text-muted">
+        <input
+          type="checkbox"
+          checked={useNuclei}
+          onChange={(e) => setUseNuclei(e.target.checked)}
+        />
+        Run Nuclei vulnerability checks (active; skipped if not installed)
       </label>
 
       {scans.length > 0 && (

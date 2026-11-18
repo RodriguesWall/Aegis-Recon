@@ -104,7 +104,10 @@ type Scan struct {
 	Status  ScanStatus `json:"status"`
 	// IncludeInfo keeps info-severity findings in the result. Default false:
 	// scans drop Info (dns/ports/tls inventory noise) unless asked.
-	IncludeInfo bool       `json:"include_info"`
+	IncludeInfo bool `json:"include_info"`
+	// UseNuclei runs the external nuclei vulnerability checks in addition to the
+	// native recon modules. Default true; still a no-op if the binary is absent.
+	UseNuclei   bool       `json:"use_nuclei"`
 	CreatedAt   time.Time  `json:"created_at"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`

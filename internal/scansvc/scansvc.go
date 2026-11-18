@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/dns"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/fingerprint"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/httpprobe"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/nuclei"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/port"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/subdomain"
 	tlsscan "github.com/RodriguesWall/aegis-recon/internal/scanner/tls"
@@ -26,12 +28,14 @@ import (
 
 // Service owns the (stateless) scanners and discoverers and runs scans.
 type Service struct {
-	store       store.Store
-	tracker     *progress.Tracker
-	resolver    *net.Resolver
-	scanners    []model.Scanner
-	discoverers []model.Discoverer
-	logger      *slog.Logger
+	store           store.Store
+	tracker         *progress.Tracker
+	resolver        *net.Resolver
+	scanners        []model.Scanner
+	discoverers     []model.Discoverer
+	nucleiBin       string
+	nucleiTemplates string
+	logger          *slog.Logger
 }
 
 // New builds the service with the F1 surface scanners and the subdomain
@@ -50,9 +54,18 @@ func New(st store.Store, tracker *progress.Tracker, logger *slog.Logger) *Servic
 			httpprobe.New(),
 			fingerprint.New(),
 		},
-		discoverers: []model.Discoverer{subdomain.New(resolver)},
-		logger:      logger,
+		discoverers:     []model.Discoverer{subdomain.New(resolver)},
+		nucleiBin:       envOr("AEGIS_NUCLEI_BIN", "nuclei"),
+		nucleiTemplates: os.Getenv("AEGIS_NUCLEI_TEMPLATES"),
+		logger:          logger,
 	}
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
 // reachable reports whether a host resolves to at least one address.
@@ -104,9 +117,20 @@ func (s *Service) Run(ctx context.Context, scanID string) (err error) {
 			s.tracker.Log(scanID, ev.Msg)
 		}
 	}
+	// Build the scanner set for this run. Nuclei is opt-in per scan (default on)
+	// and only added when its binary is present, so it degrades cleanly.
+	scanners := s.scanners
+	if scan.UseNuclei && nuclei.Available(s.nucleiBin) {
+		scanners = append(append([]model.Scanner{}, s.scanners...),
+			nuclei.New(nuclei.WithBin(s.nucleiBin), nuclei.WithTemplates(s.nucleiTemplates)))
+		if s.logger != nil {
+			s.logger.Info("nuclei enabled for scan", "scan", scanID)
+		}
+	}
+
 	// Per-host rate limit (anti-DoS): at most one probe per host every 200ms.
 	limiter := scope.NewRateLimiter(200 * time.Millisecond)
-	eng := engine.New(s.scanners,
+	eng := engine.New(scanners,
 		engine.WithHostGate(limiter.Wait),
 		engine.WithReachable(s.reachable),
 		engine.WithProgress(prog),
