@@ -95,7 +95,7 @@ export const api = {
 
   // Download URL for a scan export; the server sets Content-Disposition so the
   // browser saves the file.
-  exportScanURL: (scanID: string, format: "json" | "sarif") =>
+  exportScanURL: (scanID: string, format: "json" | "sarif" | "csv") =>
     `${BASE}/scans/${scanID}/export?format=${format}`,
 
   // Health/version. /health is at the root (not under /api); best-effort.
