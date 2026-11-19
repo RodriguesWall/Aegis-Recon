@@ -30,6 +30,16 @@ A surface scan runs these native-Go modules concurrently:
 | `httpprobe` | Status, redirects, title, security headers |
 | `fingerprint` | Technology/stack detection |
 | `cdn` | WAF/CDN detection (header + CNAME heuristics; Cloudflare, Akamai, CloudFront, Fastly, Sucuri, Imperva, …) |
+| `emailposture` | SPF / DMARC / DKIM posture (DNS TXT) |
+| `exposedfiles` | Exposed sensitive paths (.git, .env, backups, actuator, swagger, …) with soft-404 baseline |
+| `cors` | CORS misconfiguration (reflected origin / wildcard + credentials) |
+| `cookies` | Missing cookie flags (HttpOnly / Secure / SameSite) |
+| `methods` | Dangerous HTTP methods (PUT/DELETE/PATCH via OPTIONS; TRACE/XST) |
+| `openredirect` | Open redirect via common params |
+| `hostheader` | Host / X-Forwarded-Host injection reflected in redirect or body |
+| `infoleak` | Leaked stack traces + version banners |
+| `openapi` | Exposed OpenAPI/Swagger spec → unauthenticated write operations |
+| `graphql` | GraphQL introspection enabled |
 
 On top of the scan itself:
 
@@ -93,7 +103,9 @@ worker pool.
 
 ```
             internal/engine    (two-phase pipeline, worker pool)
-            internal/scanner   (dns, subdomain, port, tls, httpprobe, fingerprint, cdn, nuclei)
+            internal/scanner   (dns, subdomain, port, tls, httpprobe, fingerprint, cdn,
+                                emailposture, exposedfiles, cors, cookies, methods,
+                                openredirect, hostheader, infoleak, openapi, graphql, nuclei)
             internal/scope     (allowlist + per-host rate limiter)
             internal/diff      (scan diffing by fingerprint)
             internal/scheduler (interval-based scheduled scans)
@@ -242,11 +254,22 @@ operator.
 - [x] Aggregate risk dashboard (severity, triage, trend)
 - [x] Per-asset scan blacklist
 
-### V3 — Planned
-- [ ] PDF report export
-- [ ] Authentication + multi-tenant (`owner_id` already in the schema)
-- [ ] Dependency track / SCA (OSV.dev)
-- [ ] Asset ownership verification (DNS TXT)
+### V3 — Platform, notifications & security detection ✓
+- [x] Persisted settings + encrypted secrets; email (SMTP) + webhook notifications
+- [x] Single-admin auth (session cookie); YAML config + configurable port
+- [x] Global findings page; dashboard drill-down (project → service)
+- [x] CSV + PDF export; scan retention cap
+- [x] Email posture (SPF/DMARC/DKIM) + sensitive-file exposure detection
+
+### V4 — Endpoint & application analysis ✓
+- [x] CORS, cookie flags, dangerous methods, open redirect, host-header injection
+- [x] Info/version leak; OpenAPI spec risk (unauthenticated write ops); GraphQL introspection
+
+### V5 — Planned
+- [ ] MCP server (query posture via an LLM)
+- [ ] PDF report with the platform's visual identity
+- [ ] User-enumeration detection; DNSSEC/AXFR
+- [ ] Authentication multi-tenant / SCA (OSV.dev) / ownership verification
 
 ---
 
