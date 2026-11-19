@@ -48,6 +48,7 @@ export interface Finding {
   evidence?: Record<string, unknown>
   fingerprint: string
   remediation?: string
+  owasp?: string
 }
 
 export type TriageStatus = "open" | "false-positive" | "accepted-risk" | "fixed"
@@ -112,6 +113,7 @@ export interface FindingRow {
   fingerprint: string
   status: string
   remediation?: string
+  owasp?: string
 }
 
 export interface SettingsData {

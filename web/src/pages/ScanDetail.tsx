@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../api/client"
 import { SeverityBadge, severityRank } from "../components/SeverityBadge"
+import { OwaspBadge } from "../components/OwaspBadge"
 import { StatusPill } from "../components/StatusPill"
 import { TriageControl } from "../components/TriageControl"
 import type { Finding, Progress, ScanDiff, ScanResult, Triage } from "../types"
@@ -255,7 +256,10 @@ export function ScanDetail() {
                   >
                     <SeverityBadge severity={f.severity} />
                     <div className="min-w-0 flex-1">
-                      <p className="text-white">{f.title}</p>
+                      <p className="flex items-center gap-2 text-white">
+                        <span className="min-w-0 truncate">{f.title}</span>
+                        <OwaspBadge code={f.owasp} />
+                      </p>
                       <p className="text-xs text-muted">
                         {f.scanner}
                         {f.evidence ? " · " + shortEvidence(f.evidence) : ""}

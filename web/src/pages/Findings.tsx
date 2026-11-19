@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { api } from "../api/client"
 import { SeverityBadge } from "../components/SeverityBadge"
+import { OWASP_NAMES, OwaspBadge } from "../components/OwaspBadge"
 import type { FindingRow, Project } from "../types"
 
 const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const
@@ -16,6 +17,15 @@ export function Findings() {
   const [status, setStatus] = useState("")
   const [project, setProject] = useState("")
   const [error, setError] = useState("")
+
+  // OWASP Top 10 breakdown over the currently shown rows (mapped rows only).
+  const owaspBreakdown = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const r of rows) {
+      if (r.owasp) counts[r.owasp] = (counts[r.owasp] ?? 0) + 1
+    }
+    return Object.entries(counts).sort(([a], [b]) => a.localeCompare(b))
+  }, [rows])
 
   useEffect(() => {
     void api.listProjects().then((p) => setProjects(p ?? []))
@@ -72,6 +82,27 @@ export function Findings() {
 
       {error && <p className="text-sev-critical">{error}</p>}
 
+      {owaspBreakdown.length > 0 && (
+        <div className="glass-card">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+            OWASP Top 10 (2021)
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {owaspBreakdown.map(([code, n]) => (
+              <span
+                key={code}
+                title={OWASP_NAMES[code] ?? code}
+                className="flex items-center gap-1.5 rounded border border-white/10 px-2 py-1 text-xs text-muted"
+              >
+                <span className="font-semibold text-white">{code}</span>
+                <span className="truncate max-w-[14rem]">{OWASP_NAMES[code] ?? code}</span>
+                <span className="rounded bg-white/10 px-1.5 font-semibold text-white">{n}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="glass-card">
         <p className="mb-3 text-xs text-muted">{rows.length} findings</p>
         <div className="space-y-2">
@@ -82,7 +113,10 @@ export function Findings() {
             >
               <SeverityBadge severity={f.severity} />
               <div className="min-w-0 flex-1">
-                <p className="text-white">{f.title}</p>
+                <p className="flex items-center gap-2 text-white">
+                  <span className="min-w-0 truncate">{f.title}</span>
+                  <OwaspBadge code={f.owasp} />
+                </p>
                 <p className="text-xs text-muted">
                   {f.host}
                   {f.port ? ":" + f.port : ""} · {f.scanner} · {f.project_name} / {f.asset_name}

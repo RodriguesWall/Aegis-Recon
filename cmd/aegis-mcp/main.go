@@ -107,6 +107,7 @@ func enrich(fs []model.Finding) []map[string]any {
 			"scanner": f.Scanner, "severity": f.Severity, "title": f.Title,
 			"target": f.Target, "evidence": f.Evidence,
 			"fingerprint": f.Fingerprint(), "remediation": report.Remediation(f),
+			"owasp": report.OWASP(f),
 		}
 	}
 	return out
