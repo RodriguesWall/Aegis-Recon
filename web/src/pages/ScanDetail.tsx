@@ -335,9 +335,10 @@ function DownloadMenu({ scanID }: { scanID: string }) {
   const [open, setOpen] = useState(false)
 
   function download(format: "json" | "sarif" | "csv" | "pdf") {
+    // No `download` attr: the server's Content-Disposition names the file
+    // (<asset>-<date>.<ext>); the attachment header still forces a download.
     const a = document.createElement("a")
     a.href = api.exportScanURL(scanID, format)
-    a.download = `scan-${scanID}.${format}`
     document.body.appendChild(a)
     a.click()
     a.remove()
