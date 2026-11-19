@@ -43,6 +43,10 @@ func Remediation(f model.Finding) string {
 		return "Require authentication on write operations and restrict the exposed API spec."
 	case "graphql":
 		return "Disable GraphQL introspection in production."
+	case "dnssec":
+		if strings.Contains(t, "zone transfer") {
+			return "Restrict AXFR to authorized secondary nameserver IPs (allow-transfer); do not allow public zone transfers."
+		}
 	case "exposedfiles":
 		return "Remove or block public access to the exposed file/path."
 	case "port":

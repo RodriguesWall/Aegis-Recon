@@ -21,6 +21,7 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/cookies"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/cors"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/dns"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/dnssec"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/emailposture"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/exposedfiles"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/fingerprint"
@@ -167,6 +168,8 @@ func (s *Service) Run(ctx context.Context, scanID string) (err error) {
 	// Domain-level email posture (SPF/DMARC/DKIM): checked once on the root
 	// domain, not per host.
 	findings = append(findings, emailposture.Check(ctx, domain, s.resolver)...)
+	// Raw-DNS posture (DNSSEC + zone-transfer): also domain-level, once.
+	findings = append(findings, dnssec.Check(ctx, domain)...)
 	if !scan.IncludeInfo {
 		findings = dropInfo(findings)
 	}
