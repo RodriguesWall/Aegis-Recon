@@ -26,6 +26,7 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/fingerprint"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/httpprobe"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/methods"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/openredirect"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/nuclei"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/port"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/subdomain"
@@ -67,6 +68,7 @@ func New(st store.Store, tracker *progress.Tracker, logger *slog.Logger) *Servic
 			cors.New(),
 			cookies.New(),
 			methods.New(),
+			openredirect.New(),
 		},
 		discoverers:     []model.Discoverer{subdomain.New(resolver)},
 		nucleiBin:       envOr("AEGIS_NUCLEI_BIN", "nuclei"),
