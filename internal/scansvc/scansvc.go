@@ -24,6 +24,7 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/emailposture"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/exposedfiles"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/fingerprint"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/graphql"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/hostheader"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/httpprobe"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/infoleak"
@@ -75,6 +76,7 @@ func New(st store.Store, tracker *progress.Tracker, logger *slog.Logger) *Servic
 			hostheader.New(),
 			infoleak.New(),
 			openapi.New(),
+			graphql.New(),
 		},
 		discoverers:     []model.Discoverer{subdomain.New(resolver)},
 		nucleiBin:       envOr("AEGIS_NUCLEI_BIN", "nuclei"),
