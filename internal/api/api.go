@@ -281,11 +281,12 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Options are optional; default (no body) means exclude Info findings and
-	// run nuclei. use_nuclei is a pointer so an omitted field defaults to true.
+	// run nuclei in intrusive mode. use_nuclei and intrusive are pointers so an
+	// omitted field defaults to true.
 	var in struct {
 		IncludeInfo bool  `json:"include_info"`
 		UseNuclei   *bool `json:"use_nuclei"`
-		Intrusive   bool  `json:"intrusive"`
+		Intrusive   *bool `json:"intrusive"`
 	}
 	if r.ContentLength != 0 && r.Body != nil {
 		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in)
@@ -294,8 +295,12 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 	if in.UseNuclei != nil {
 		useNuclei = *in.UseNuclei
 	}
-	// Intrusive only means anything with nuclei running.
-	intrusive := in.Intrusive && useNuclei
+	// Intrusive defaults on; it only means anything with nuclei running.
+	intrusiveReq := true
+	if in.Intrusive != nil {
+		intrusiveReq = *in.Intrusive
+	}
+	intrusive := intrusiveReq && useNuclei
 	scan := &model.Scan{
 		ID:          uuid.NewString(),
 		AssetID:     assetID,
@@ -372,7 +377,12 @@ func (s *Server) getScan(w http.ResponseWriter, r *http.Request) {
 	for _, t := range triage {
 		tmap[t.Fingerprint] = t
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"scan": scan, "findings": withFingerprints(findings), "triage": tmap})
+	// Asset name so the report header names the scanned service (best-effort).
+	assetName := ""
+	if a, err := s.store.GetAsset(r.Context(), scan.AssetID); err == nil {
+		assetName = a.Name
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"scan": scan, "asset_name": assetName, "findings": withFingerprints(findings), "triage": tmap})
 }
 
 // findingDTO is a Finding plus its fingerprint, so the client can look each one

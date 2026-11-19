@@ -119,7 +119,7 @@ function AssetCard({
   const [scanToDelete, setScanToDelete] = useState<string | null>(null)
   const [includeInfo, setIncludeInfo] = useState(false)
   const [useNuclei, setUseNuclei] = useState(true)
-  const [intrusive, setIntrusive] = useState(false)
+  const [intrusive, setIntrusive] = useState(true)
 
   async function save() {
     const n = draft.trim()

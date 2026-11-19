@@ -63,6 +63,7 @@ export interface Triage {
 
 export interface ScanResult {
   scan: Scan
+  asset_name?: string
   findings: Finding[] | null
   triage?: Record<string, Triage>
 }

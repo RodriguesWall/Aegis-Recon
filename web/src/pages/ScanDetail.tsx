@@ -146,7 +146,7 @@ export function ScanDetail() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-3xl">
-            <span className="gradient-text">Scan</span>
+            <span className="gradient-text">{data.asset_name || "Scan"}</span>
           </h1>
           <p className="flex items-center gap-2 text-muted">
             Status: <StatusPill status={scan.status} />
