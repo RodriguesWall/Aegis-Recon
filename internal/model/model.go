@@ -107,12 +107,21 @@ type Scan struct {
 	IncludeInfo bool `json:"include_info"`
 	// UseNuclei runs the external nuclei vulnerability checks in addition to the
 	// native recon modules. Default true; still a no-op if the binary is absent.
-	UseNuclei   bool       `json:"use_nuclei"`
+	UseNuclei bool `json:"use_nuclei"`
+	// Trigger records what started the scan: "manual" (user/API) or "scheduled"
+	// (the interval scheduler). Drives notification scope.
+	Trigger     string     `json:"trigger"`
 	CreatedAt   time.Time  `json:"created_at"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	Error       string     `json:"error,omitempty"`
 }
+
+// Scan trigger sources.
+const (
+	TriggerManual    = "manual"
+	TriggerScheduled = "scheduled"
+)
 
 // Target is a single thing a scanner acts on.
 type Target struct {
@@ -182,11 +191,18 @@ func (s TriageStatus) SuppressesNew() bool {
 }
 
 // CurrentFinding is a finding from the latest completed scan of its asset,
-// tagged with its project. Used to build the aggregate dashboard snapshot.
+// tagged with its project. Used for the aggregate dashboard snapshot and the
+// global findings view.
 type CurrentFinding struct {
 	ProjectID   string
+	ProjectName string
 	AssetID     string
+	AssetName   string
+	Scanner     string
 	Severity    Severity
+	Title       string
+	Host        string
+	Port        int
 	Fingerprint string
 }
 

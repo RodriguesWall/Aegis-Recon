@@ -9,14 +9,18 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/RodriguesWall/aegis-recon/internal/engine"
 	"github.com/RodriguesWall/aegis-recon/internal/model"
+	"github.com/RodriguesWall/aegis-recon/internal/notify"
 	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/cdn"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/dns"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/emailposture"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/exposedfiles"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/fingerprint"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/httpprobe"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/nuclei"
@@ -36,6 +40,7 @@ type Service struct {
 	discoverers     []model.Discoverer
 	nucleiBin       string
 	nucleiTemplates string
+	notifier        *notify.Service
 	logger          *slog.Logger
 }
 
@@ -55,10 +60,12 @@ func New(st store.Store, tracker *progress.Tracker, logger *slog.Logger) *Servic
 			httpprobe.New(),
 			fingerprint.New(),
 			cdn.New(resolver),
+			exposedfiles.New(),
 		},
 		discoverers:     []model.Discoverer{subdomain.New(resolver)},
 		nucleiBin:       envOr("AEGIS_NUCLEI_BIN", "nuclei"),
 		nucleiTemplates: os.Getenv("AEGIS_NUCLEI_TEMPLATES"),
+		notifier:        notify.New(st, logger),
 		logger:          logger,
 	}
 }
@@ -141,6 +148,9 @@ func (s *Service) Run(ctx context.Context, scanID string) (err error) {
 	result := eng.RunPipeline(ctx, domain, s.discoverers, sc.Filter)
 
 	findings := result.Findings
+	// Domain-level email posture (SPF/DMARC/DKIM): checked once on the root
+	// domain, not per host.
+	findings = append(findings, emailposture.Check(ctx, domain, s.resolver)...)
 	if !scan.IncludeInfo {
 		findings = dropInfo(findings)
 	}
@@ -163,9 +173,34 @@ func (s *Service) Run(ctx context.Context, scanID string) (err error) {
 		s.tracker.Done(scanID)
 	}
 
+	// Retention: keep the newest N scans per asset (default 30; 0 = unlimited).
+	keep := 30
+	if v, ok, _ := s.store.GetSetting(ctx, "retention_keep"); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			keep = n
+		}
+	}
+	if keep > 0 {
+		if n, err := s.store.PruneScans(ctx, scan.AssetID, keep); err != nil {
+			if s.logger != nil {
+				s.logger.Error("prune scans", "asset", scan.AssetID, "err", err)
+			}
+		} else if n > 0 && s.logger != nil {
+			s.logger.Info("pruned old scans", "asset", scan.AssetID, "deleted", n, "keep", keep)
+		}
+	}
+
 	if s.logger != nil {
 		s.logger.Info("scan completed", "scan", scanID, "domain", domain,
 			"findings", len(result.Findings), "errors", len(result.Meta.Errors))
+	}
+
+	// Best-effort notification (email/webhook), decoupled from the scan result.
+	// Uses a background context so it is not cancelled when this job's ctx ends.
+	if s.notifier != nil {
+		completed := *scan
+		notifyFindings := append([]model.Finding(nil), findings...)
+		go s.notifier.ScanComplete(context.Background(), &completed, notifyFindings)
 	}
 	return nil
 }

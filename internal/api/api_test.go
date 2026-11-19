@@ -14,6 +14,7 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/model"
 	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/queue"
+	"github.com/RodriguesWall/aegis-recon/internal/secret"
 	"github.com/RodriguesWall/aegis-recon/internal/store/memory"
 )
 
@@ -266,10 +267,11 @@ func TestStats(t *testing.T) {
 			Open          int `json:"open"`
 			FalsePositive int `json:"false_positive"`
 		} `json:"triage"`
-		Projects []struct {
+		BreakdownBy string `json:"breakdown_by"`
+		Breakdown   []struct {
 			Name  string `json:"name"`
 			Total int    `json:"total"`
-		} `json:"projects"`
+		} `json:"breakdown"`
 		Trend []struct {
 			ScanID string `json:"scan_id"`
 		} `json:"trend"`
@@ -287,8 +289,8 @@ func TestStats(t *testing.T) {
 	if got.Triage.FalsePositive != 1 || got.Triage.Open != 2 {
 		t.Fatalf("triage wrong: %+v", got.Triage)
 	}
-	if len(got.Projects) != 1 || got.Projects[0].Total != 3 {
-		t.Fatalf("projects wrong: %+v", got.Projects)
+	if got.BreakdownBy != "project" || len(got.Breakdown) != 1 || got.Breakdown[0].Total != 3 {
+		t.Fatalf("breakdown wrong: by=%q %+v", got.BreakdownBy, got.Breakdown)
 	}
 	// Trend has both completed scans, oldest first.
 	if len(got.Trend) != 2 || got.Trend[0].ScanID != "old" || got.Trend[1].ScanID != "s1" {
@@ -298,6 +300,134 @@ func TestStats(t *testing.T) {
 
 type sevStub struct {
 	Critical, High, Medium, Low, Info, Total int
+}
+
+func TestAuthFlow(t *testing.T) {
+	t.Setenv("AEGIS_ADMIN_PASSWORD", "s3cret")
+	st := memory.New()
+	q := queue.New(func(context.Context, string) error { return nil })
+	h := api.New(st, q, progress.New()).Routes()
+
+	// Protected endpoint without a session -> 401.
+	if w := do(t, h, "GET", "/api/projects", ""); w.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401 unauthenticated, got %d", w.Code)
+	}
+	// Wrong password -> 401, no cookie.
+	if w := do(t, h, "POST", "/api/login", `{"password":"nope"}`); w.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401 bad login, got %d", w.Code)
+	}
+	// Correct password -> 200 + Set-Cookie.
+	w := do(t, h, "POST", "/api/login", `{"password":"s3cret"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("login failed: %d %s", w.Code, w.Body)
+	}
+	cookies := w.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("login set no cookie")
+	}
+	// Reuse the cookie on a protected request -> 200.
+	r := httptest.NewRequest("GET", "/api/projects", nil)
+	for _, c := range cookies {
+		r.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 with session, got %d", rec.Code)
+	}
+}
+
+func TestFindingsList(t *testing.T) {
+	st := memory.New()
+	q := queue.New(func(context.Context, string) error { return nil })
+	h := api.New(st, q, progress.New()).Routes()
+	ctx := context.Background()
+	st.CreateProject(ctx, &model.Project{ID: "p1", Name: "Acme"})
+	st.CreateAsset(ctx, &model.Asset{ID: "a1", ProjectID: "p1", Name: "acme.example", Type: model.AssetDomain})
+	st.CreateScan(ctx, &model.Scan{ID: "s1", AssetID: "a1", Type: model.ScanSurface, Status: model.StatusCompleted, CreatedAt: time.Unix(10, 0)})
+	fs := []model.Finding{
+		{Scanner: "httpprobe", Target: model.Target{Host: "acme.example", Port: 443}, Severity: model.SeverityCritical, Title: "admin exposed"},
+		{Scanner: "port", Target: model.Target{Host: "acme.example", Port: 3306}, Severity: model.SeverityHigh, Title: "mysql open"},
+	}
+	st.SaveFindings(ctx, "s1", fs)
+	st.SetTriage(ctx, &model.Triage{AssetID: "a1", Fingerprint: fs[1].Fingerprint(), Status: model.TriageFalsePositive})
+
+	decode := func(body []byte) []map[string]any {
+		var v []map[string]any
+		if err := json.Unmarshal(body, &v); err != nil {
+			t.Fatalf("decode: %v\n%s", err, body)
+		}
+		return v
+	}
+
+	// All: 2 findings, enriched + status.
+	all := decode(do(t, h, "GET", "/api/findings", "").Body.Bytes())
+	if len(all) != 2 {
+		t.Fatalf("want 2 findings, got %d", len(all))
+	}
+	if all[0]["severity"] != "critical" || all[0]["project_name"] != "Acme" || all[0]["asset_name"] != "acme.example" {
+		t.Fatalf("enrichment/order wrong: %+v", all[0])
+	}
+
+	// Filter by severity.
+	if got := decode(do(t, h, "GET", "/api/findings?severity=high", "").Body.Bytes()); len(got) != 1 || got[0]["title"] != "mysql open" {
+		t.Fatalf("severity filter wrong: %+v", got)
+	}
+	// Filter by status (false-positive -> the mysql finding).
+	if got := decode(do(t, h, "GET", "/api/findings?status=false-positive", "").Body.Bytes()); len(got) != 1 || got[0]["scanner"] != "port" {
+		t.Fatalf("status filter wrong: %+v", got)
+	}
+	// Text search on title.
+	if got := decode(do(t, h, "GET", "/api/findings?q=admin", "").Body.Bytes()); len(got) != 1 || got[0]["title"] != "admin exposed" {
+		t.Fatalf("q filter wrong: %+v", got)
+	}
+}
+
+func TestSettings(t *testing.T) {
+	st := memory.New()
+	q := queue.New(func(context.Context, string) error { return nil })
+	h := api.New(st, q, progress.New()).Routes()
+
+	// PUT a visible setting and a secret.
+	w := do(t, h, "PUT", "/api/settings", `{"smtp_host":"mail.example.com","smtp_pass":"hunter2"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("put settings: %d %s", w.Code, w.Body)
+	}
+
+	// GET must expose smtp_host but never the password; secrets_set reports it.
+	w = do(t, h, "GET", "/api/settings", "")
+	var got struct {
+		Settings   map[string]string `json:"settings"`
+		SecretsSet map[string]bool   `json:"secrets_set"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v\n%s", err, w.Body)
+	}
+	if got.Settings["smtp_host"] != "mail.example.com" {
+		t.Fatalf("smtp_host wrong: %+v", got.Settings)
+	}
+	if _, leaked := got.Settings["smtp_pass"]; leaked {
+		t.Fatal("smtp_pass must not be returned in plaintext")
+	}
+	if !got.SecretsSet["smtp_pass"] {
+		t.Fatalf("secrets_set should report smtp_pass set: %+v", got.SecretsSet)
+	}
+
+	// The stored value must be encrypted, and decrypt back to the original.
+	raw, _, _ := st.GetSetting(context.Background(), "smtp_pass")
+	if raw == "hunter2" {
+		t.Fatal("password stored in plaintext")
+	}
+	if dec, err := secret.Decrypt(raw); err != nil || dec != "hunter2" {
+		t.Fatalf("stored secret did not decrypt: dec=%q err=%v", dec, err)
+	}
+
+	// Empty secret on PUT keeps the existing one.
+	do(t, h, "PUT", "/api/settings", `{"smtp_pass":""}`)
+	raw2, _, _ := st.GetSetting(context.Background(), "smtp_pass")
+	if raw2 != raw {
+		t.Fatal("empty secret value should not overwrite the stored password")
+	}
 }
 
 func TestScanOnMissingAsset(t *testing.T) {

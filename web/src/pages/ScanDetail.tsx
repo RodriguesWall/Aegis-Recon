@@ -334,10 +334,10 @@ function ChangeList({ label, color, items }: { label: string; color: string; ite
 function DownloadMenu({ scanID }: { scanID: string }) {
   const [open, setOpen] = useState(false)
 
-  function download(format: "json" | "sarif") {
+  function download(format: "json" | "sarif" | "csv" | "pdf") {
     const a = document.createElement("a")
     a.href = api.exportScanURL(scanID, format)
-    a.download = `scan-${scanID}.${format === "sarif" ? "sarif" : "json"}`
+    a.download = `scan-${scanID}.${format}`
     document.body.appendChild(a)
     a.click()
     a.remove()
@@ -364,6 +364,18 @@ function DownloadMenu({ scanID }: { scanID: string }) {
             onClick={() => download("sarif")}
           >
             SARIF
+          </button>
+          <button
+            className="block w-full px-4 py-2 text-left text-sm text-white hover:bg-white/10"
+            onClick={() => download("csv")}
+          >
+            CSV
+          </button>
+          <button
+            className="block w-full px-4 py-2 text-left text-sm text-white hover:bg-white/10"
+            onClick={() => download("pdf")}
+          >
+            PDF
           </button>
         </div>
       )}

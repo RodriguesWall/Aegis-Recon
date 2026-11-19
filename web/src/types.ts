@@ -93,8 +93,28 @@ export interface Stats {
   totals: { projects: number; assets: number; findings: number }
   severity: SeverityCounts
   triage: { open: number; false_positive: number; accepted_risk: number; fixed: number }
-  projects: ProjectStat[]
+  breakdown_by: string // "project" | "asset" | ""
+  breakdown: ProjectStat[]
   trend: TrendPoint[]
+}
+
+export interface FindingRow {
+  project_id: string
+  project_name: string
+  asset_id: string
+  asset_name: string
+  scanner: string
+  severity: Severity
+  title: string
+  host: string
+  port: number
+  fingerprint: string
+  status: string
+}
+
+export interface SettingsData {
+  settings: Record<string, string>
+  secrets_set: Record<string, boolean>
 }
 
 export interface Schedule {

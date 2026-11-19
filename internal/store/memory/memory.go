@@ -27,6 +27,8 @@ type Store struct {
 	triage map[string]model.Triage
 	// schedules keyed by asset_id.
 	schedules map[string]model.Schedule
+	// settings key→value.
+	settings map[string]string
 }
 
 // New returns an empty in-memory store.
@@ -38,6 +40,7 @@ func New() *Store {
 		findings:  map[string][]model.Finding{},
 		triage:    map[string]model.Triage{},
 		schedules: map[string]model.Schedule{},
+		settings:  map[string]string{},
 	}
 }
 
@@ -348,10 +351,20 @@ func (s *Store) CurrentFindings(_ context.Context) ([]model.CurrentFinding, erro
 			continue
 		}
 		for _, f := range s.findings[sc.ID] {
+			host := f.Target.Host
+			if host == "" {
+				host = f.Target.Domain
+			}
 			out = append(out, model.CurrentFinding{
 				ProjectID:   a.ProjectID,
+				ProjectName: s.projects[a.ProjectID].Name,
 				AssetID:     assetID,
+				AssetName:   a.Name,
+				Scanner:     f.Scanner,
 				Severity:    f.Severity,
+				Title:       f.Title,
+				Host:        host,
+				Port:        f.Target.Port,
 				Fingerprint: f.Fingerprint(),
 			})
 		}
@@ -369,7 +382,7 @@ func (s *Store) ListAllTriage(_ context.Context) ([]model.Triage, error) {
 	return out, nil
 }
 
-func (s *Store) SeverityTrend(_ context.Context, limit int) ([]model.ScanSeverityPoint, error) {
+func (s *Store) SeverityTrend(_ context.Context, projectID, assetID string, limit int) ([]model.ScanSeverityPoint, error) {
 	if limit <= 0 {
 		limit = 30
 	}
@@ -378,6 +391,12 @@ func (s *Store) SeverityTrend(_ context.Context, limit int) ([]model.ScanSeverit
 	var pts []model.ScanSeverityPoint
 	for _, sc := range s.scans {
 		if sc.Status != model.StatusCompleted {
+			continue
+		}
+		if assetID != "" && sc.AssetID != assetID {
+			continue
+		}
+		if projectID != "" && s.assets[sc.AssetID].ProjectID != projectID {
 			continue
 		}
 		at := sc.CreatedAt
@@ -406,6 +425,55 @@ func (s *Store) SeverityTrend(_ context.Context, limit int) ([]model.ScanSeverit
 		pts = pts[len(pts)-limit:]
 	}
 	return pts, nil
+}
+
+func (s *Store) PruneScans(_ context.Context, assetID string, keep int) (int, error) {
+	if keep <= 0 {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var scans []model.Scan
+	for _, sc := range s.scans {
+		if sc.AssetID == assetID {
+			scans = append(scans, sc)
+		}
+	}
+	if len(scans) <= keep {
+		return 0, nil
+	}
+	sort.Slice(scans, func(i, j int) bool { return scans[i].CreatedAt.After(scans[j].CreatedAt) })
+	deleted := 0
+	for _, sc := range scans[keep:] {
+		delete(s.findings, sc.ID)
+		delete(s.scans, sc.ID)
+		deleted++
+	}
+	return deleted, nil
+}
+
+func (s *Store) GetSetting(_ context.Context, key string) (string, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := s.settings[key]
+	return v, ok, nil
+}
+
+func (s *Store) SetSetting(_ context.Context, key, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settings[key] = value
+	return nil
+}
+
+func (s *Store) AllSettings(_ context.Context) (map[string]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[string]string, len(s.settings))
+	for k, v := range s.settings {
+		out[k] = v
+	}
+	return out, nil
 }
 
 // compile-time check.

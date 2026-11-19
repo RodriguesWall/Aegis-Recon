@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS scans (
 	status       TEXT NOT NULL,
 	include_info INTEGER NOT NULL DEFAULT 0,
 	use_nuclei   INTEGER NOT NULL DEFAULT 1,
+	trigger      TEXT NOT NULL DEFAULT 'manual',
 	created_at   TIMESTAMP NOT NULL,
 	started_at   TIMESTAMP,
 	completed_at TIMESTAMP,
@@ -109,6 +110,11 @@ CREATE TABLE IF NOT EXISTS schedules (
 	enabled          INTEGER NOT NULL DEFAULT 0,
 	updated_at       TIMESTAMP NOT NULL
 );
+CREATE TABLE IF NOT EXISTS settings (
+	key        TEXT PRIMARY KEY,
+	value      TEXT NOT NULL,
+	updated_at TIMESTAMP NOT NULL
+);
 `
 
 // Migrate creates the schema if absent.
@@ -124,6 +130,8 @@ func (s *Store) Migrate(ctx context.Context) error {
 		`ALTER TABLE scans ADD COLUMN include_info INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.ExecContext(ctx,
 		`ALTER TABLE scans ADD COLUMN use_nuclei INTEGER NOT NULL DEFAULT 1`)
+	_, _ = s.db.ExecContext(ctx,
+		`ALTER TABLE scans ADD COLUMN trigger TEXT NOT NULL DEFAULT 'manual'`)
 	// Same best-effort add for the finding fingerprint (scan diffing + triage).
 	// Run before the index so databases predating the column still migrate.
 	// Per-asset scan blacklist (Notes #18).
@@ -134,6 +142,14 @@ func (s *Store) Migrate(ctx context.Context) error {
 	_, _ = s.db.ExecContext(ctx,
 		`CREATE INDEX IF NOT EXISTS idx_findings_fp ON findings(fingerprint)`)
 	return nil
+}
+
+// triggerOr defaults an empty trigger to "manual".
+func triggerOr(t string) string {
+	if t == "" {
+		return model.TriggerManual
+	}
+	return t
 }
 
 func boolToInt(b bool) int {
@@ -309,9 +325,9 @@ func (s *Store) CreateScan(ctx context.Context, sc *model.Scan) error {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO scans (id, asset_id, type, status, include_info, use_nuclei, created_at, started_at, completed_at, error)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		sc.ID, sc.AssetID, sc.Type, sc.Status, boolToInt(sc.IncludeInfo), boolToInt(sc.UseNuclei), sc.CreatedAt, sc.StartedAt, sc.CompletedAt, sc.Error)
+		`INSERT INTO scans (id, asset_id, type, status, include_info, use_nuclei, trigger, created_at, started_at, completed_at, error)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sc.ID, sc.AssetID, sc.Type, sc.Status, boolToInt(sc.IncludeInfo), boolToInt(sc.UseNuclei), triggerOr(sc.Trigger), sc.CreatedAt, sc.StartedAt, sc.CompletedAt, sc.Error)
 	return err
 }
 
@@ -326,10 +342,10 @@ func (s *Store) UpdateScan(ctx context.Context, sc *model.Scan) error {
 
 func (s *Store) GetScan(ctx context.Context, id string) (*model.Scan, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, asset_id, type, status, include_info, use_nuclei, created_at, started_at, completed_at, error FROM scans WHERE id = ?`, id)
+		`SELECT id, asset_id, type, status, include_info, use_nuclei, trigger, created_at, started_at, completed_at, error FROM scans WHERE id = ?`, id)
 	var sc model.Scan
 	var includeInfo, useNuclei int
-	if err := row.Scan(&sc.ID, &sc.AssetID, &sc.Type, &sc.Status, &includeInfo, &useNuclei, &sc.CreatedAt, &sc.StartedAt, &sc.CompletedAt, &sc.Error); err != nil {
+	if err := row.Scan(&sc.ID, &sc.AssetID, &sc.Type, &sc.Status, &includeInfo, &useNuclei, &sc.Trigger, &sc.CreatedAt, &sc.StartedAt, &sc.CompletedAt, &sc.Error); err != nil {
 		return nil, err
 	}
 	sc.IncludeInfo = includeInfo != 0
@@ -339,7 +355,7 @@ func (s *Store) GetScan(ctx context.Context, id string) (*model.Scan, error) {
 
 func (s *Store) ListScans(ctx context.Context, assetID string) ([]model.Scan, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, asset_id, type, status, include_info, use_nuclei, created_at, started_at, completed_at, error
+		`SELECT id, asset_id, type, status, include_info, use_nuclei, trigger, created_at, started_at, completed_at, error
 		 FROM scans WHERE asset_id = ? ORDER BY created_at DESC`, assetID)
 	if err != nil {
 		return nil, err
@@ -358,7 +374,7 @@ func (s *Store) ListProcessingScans(ctx context.Context) ([]model.Scan, error) {
 
 func (s *Store) listByStatus(ctx context.Context, status model.ScanStatus) ([]model.Scan, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, asset_id, type, status, include_info, use_nuclei, created_at, started_at, completed_at, error
+		`SELECT id, asset_id, type, status, include_info, use_nuclei, trigger, created_at, started_at, completed_at, error
 		 FROM scans WHERE status = ? ORDER BY created_at`, status)
 	if err != nil {
 		return nil, err
@@ -373,7 +389,7 @@ func scanRows(rows *sql.Rows) ([]model.Scan, error) {
 	for rows.Next() {
 		var sc model.Scan
 		var includeInfo, useNuclei int
-		if err := rows.Scan(&sc.ID, &sc.AssetID, &sc.Type, &sc.Status, &includeInfo, &useNuclei, &sc.CreatedAt, &sc.StartedAt, &sc.CompletedAt, &sc.Error); err != nil {
+		if err := rows.Scan(&sc.ID, &sc.AssetID, &sc.Type, &sc.Status, &includeInfo, &useNuclei, &sc.Trigger, &sc.CreatedAt, &sc.StartedAt, &sc.CompletedAt, &sc.Error); err != nil {
 			return nil, err
 		}
 		sc.IncludeInfo = includeInfo != 0
@@ -495,7 +511,7 @@ func (s *Store) ListDueSchedules(ctx context.Context, now time.Time) ([]model.Sc
 // CurrentFindings returns findings from the latest COMPLETED scan of each asset.
 func (s *Store) CurrentFindings(ctx context.Context) ([]model.CurrentFinding, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT a.project_id, ls.asset_id, f.severity, f.fingerprint
+		`SELECT a.project_id, p.name, ls.asset_id, a.name, f.scanner, f.severity, f.title, f.target, f.fingerprint
 		 FROM findings f
 		 JOIN (
 		   SELECT sc.id AS scan_id, sc.asset_id
@@ -506,7 +522,8 @@ func (s *Store) CurrentFindings(ctx context.Context) ([]model.CurrentFinding, er
 		   ) latest ON latest.asset_id = sc.asset_id AND latest.mx = sc.created_at
 		   WHERE sc.status = 'COMPLETED'
 		 ) ls ON ls.scan_id = f.scan_id
-		 JOIN assets a ON a.id = ls.asset_id`)
+		 JOIN assets a ON a.id = ls.asset_id
+		 JOIN projects p ON p.id = a.project_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -514,9 +531,18 @@ func (s *Store) CurrentFindings(ctx context.Context) ([]model.CurrentFinding, er
 	var out []model.CurrentFinding
 	for rows.Next() {
 		var cf model.CurrentFinding
-		if err := rows.Scan(&cf.ProjectID, &cf.AssetID, &cf.Severity, &cf.Fingerprint); err != nil {
+		var target string
+		if err := rows.Scan(&cf.ProjectID, &cf.ProjectName, &cf.AssetID, &cf.AssetName,
+			&cf.Scanner, &cf.Severity, &cf.Title, &target, &cf.Fingerprint); err != nil {
 			return nil, err
 		}
+		var t model.Target
+		_ = json.Unmarshal([]byte(target), &t)
+		cf.Host = t.Host
+		if cf.Host == "" {
+			cf.Host = t.Domain
+		}
+		cf.Port = t.Port
 		out = append(out, cf)
 	}
 	return out, rows.Err()
@@ -540,7 +566,7 @@ func (s *Store) ListAllTriage(ctx context.Context) ([]model.Triage, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) SeverityTrend(ctx context.Context, limit int) ([]model.ScanSeverityPoint, error) {
+func (s *Store) SeverityTrend(ctx context.Context, projectID, assetID string, limit int) ([]model.ScanSeverityPoint, error) {
 	if limit <= 0 {
 		limit = 30
 	}
@@ -552,11 +578,14 @@ func (s *Store) SeverityTrend(ctx context.Context, limit int) ([]model.ScanSever
 		        SUM(CASE f.severity WHEN 'low'      THEN 1 ELSE 0 END),
 		        SUM(CASE f.severity WHEN 'info'     THEN 1 ELSE 0 END)
 		 FROM scans sc
+		 JOIN assets a ON a.id = sc.asset_id
 		 LEFT JOIN findings f ON f.scan_id = sc.id
 		 WHERE sc.status = 'COMPLETED'
+		   AND (? = '' OR a.project_id = ?)
+		   AND (? = '' OR sc.asset_id = ?)
 		 GROUP BY sc.id
 		 ORDER BY COALESCE(sc.completed_at, sc.created_at) DESC
-		 LIMIT ?`, limit)
+		 LIMIT ?`, projectID, projectID, assetID, assetID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -585,6 +614,94 @@ func (s *Store) SeverityTrend(ctx context.Context, limit int) ([]model.ScanSever
 		out[i], out[j] = out[j], out[i]
 	}
 	return out, nil
+}
+
+// PruneScans deletes the asset's scans beyond the newest keep, and their
+// findings, in one transaction.
+func (s *Store) PruneScans(ctx context.Context, assetID string, keep int) (int, error) {
+	if keep <= 0 {
+		return 0, nil
+	}
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// IDs to delete: everything after the newest `keep` by created_at.
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id FROM scans WHERE asset_id = ? ORDER BY created_at DESC LIMIT -1 OFFSET ?`,
+		assetID, keep)
+	if err != nil {
+		return 0, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM findings WHERE scan_id = ?`, id); err != nil {
+			return 0, err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM scans WHERE id = ?`, id); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(ids), nil
+}
+
+func (s *Store) GetSetting(ctx context.Context, key string) (string, bool, error) {
+	var v string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, key).Scan(&v)
+	switch err {
+	case nil:
+		return v, true, nil
+	case sql.ErrNoRows:
+		return "", false, nil
+	default:
+		return "", false, err
+	}
+}
+
+func (s *Store) SetSetting(ctx context.Context, key, value string) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+		key, value, time.Now().UTC())
+	return err
+}
+
+func (s *Store) AllSettings(ctx context.Context) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM settings`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) HasActiveScan(ctx context.Context, assetID string) (bool, error) {

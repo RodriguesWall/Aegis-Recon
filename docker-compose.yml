@@ -13,6 +13,11 @@ services:
     # The web container reverse-proxies /api to it. Single entry point = web.
     expose:
       - "8080"
+    environment:
+      # Set these to enable auth and strong secret encryption:
+      #   AEGIS_ADMIN_PASSWORD=... AEGIS_SECRET_KEY=... docker compose up -d
+      AEGIS_ADMIN_PASSWORD: ${AEGIS_ADMIN_PASSWORD:-}
+      AEGIS_SECRET_KEY: ${AEGIS_SECRET_KEY:-}
     volumes:
       - aegis-data:/data
     healthcheck:
@@ -28,7 +33,8 @@ services:
       dockerfile: web/Dockerfile
     restart: unless-stopped
     ports:
-      - "8080:80"
+      # Host port is configurable: AEGIS_WEB_PORT=9000 docker compose up -d
+      - "${AEGIS_WEB_PORT:-8080}:80"
     depends_on:
       api:
         condition: service_healthy

@@ -127,7 +127,7 @@ func TestSQLite_StatsAggregation(t *testing.T) {
 	})
 
 	// SeverityTrend must not error (regression: COALESCE broke time scanning).
-	trend, err := st.SeverityTrend(ctx, 30)
+	trend, err := st.SeverityTrend(ctx, "", "", 30)
 	if err != nil {
 		t.Fatalf("SeverityTrend: %v", err)
 	}
@@ -144,6 +144,49 @@ func TestSQLite_StatsAggregation(t *testing.T) {
 	}
 	if len(cur) != 2 || cur[0].ProjectID != "p1" {
 		t.Fatalf("current findings wrong: %+v", cur)
+	}
+}
+
+func TestSQLite_PruneScans(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer st.Close()
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	st.CreateProject(ctx, &model.Project{ID: "p1", Name: "P", CreatedAt: time.Now()})
+	st.CreateAsset(ctx, &model.Asset{ID: "a1", ProjectID: "p1", Type: model.AssetDomain, Name: "x", CreatedAt: time.Now()})
+	base := time.Unix(1000, 0)
+	for i := 0; i < 5; i++ {
+		id := string(rune('a' + i))
+		st.CreateScan(ctx, &model.Scan{ID: id, AssetID: "a1", Type: model.ScanSurface, Status: model.StatusCompleted, CreatedAt: base.Add(time.Duration(i) * time.Minute)})
+		st.SaveFindings(ctx, id, []model.Finding{{Scanner: "port", Target: model.Target{Host: "x", Port: 1}, Severity: model.SeverityLow, Title: "f" + id}})
+	}
+
+	n, err := st.PruneScans(ctx, "a1", 3)
+	if err != nil || n != 2 {
+		t.Fatalf("prune = %d, %v; want 2, nil", n, err)
+	}
+	scans, _ := st.ListScans(ctx, "a1")
+	if len(scans) != 3 {
+		t.Fatalf("expected 3 scans kept, got %d", len(scans))
+	}
+	// Oldest two ("a","b") gone; newest kept ("e","d","c").
+	for _, sc := range scans {
+		if sc.ID == "a" || sc.ID == "b" {
+			t.Fatalf("old scan %q should be pruned", sc.ID)
+		}
+	}
+	// Findings of a pruned scan are gone.
+	if fs, _ := st.ListFindings(ctx, "a"); len(fs) != 0 {
+		t.Fatalf("pruned scan findings remain: %v", fs)
+	}
+	// keep <= 0 is a no-op.
+	if n, _ := st.PruneScans(ctx, "a1", 0); n != 0 {
+		t.Fatalf("keep=0 must prune nothing, got %d", n)
 	}
 }
 

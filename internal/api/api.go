@@ -8,14 +8,17 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/RodriguesWall/aegis-recon/internal/auth"
 	"github.com/RodriguesWall/aegis-recon/internal/diff"
 	"github.com/RodriguesWall/aegis-recon/internal/model"
 	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/queue"
 	"github.com/RodriguesWall/aegis-recon/internal/report"
+	"github.com/RodriguesWall/aegis-recon/internal/secret"
 	"github.com/RodriguesWall/aegis-recon/internal/store"
 	"github.com/RodriguesWall/aegis-recon/internal/version"
 	"github.com/google/uuid"
@@ -37,7 +40,13 @@ func New(st store.Store, q *queue.Queue, tracker *progress.Tracker) *Server {
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
+	mux.HandleFunc("GET /api/auth", s.authStatus)
+	mux.HandleFunc("POST /api/login", s.login)
+	mux.HandleFunc("POST /api/logout", s.logout)
 	mux.HandleFunc("GET /api/stats", s.stats)
+	mux.HandleFunc("GET /api/findings", s.findings)
+	mux.HandleFunc("GET /api/settings", s.getSettings)
+	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	mux.HandleFunc("POST /api/projects", s.createProject)
 	mux.HandleFunc("GET /api/projects", s.listProjects)
 	mux.HandleFunc("PATCH /api/projects/{id}", s.updateProject)
@@ -56,7 +65,37 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/assets/{id}/schedule", s.getSchedule)
 	mux.HandleFunc("PUT /api/assets/{id}/schedule", s.setSchedule)
 	mux.HandleFunc("DELETE /api/scans/{id}", s.deleteScan)
-	return cors(mux)
+	return cors(auth.Middleware(mux))
+}
+
+// authStatus reports whether auth is enabled and the caller is authenticated.
+func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]bool{
+		"enabled":       auth.Enabled(),
+		"authenticated": !auth.Enabled() || auth.Valid(r),
+	})
+}
+
+// login verifies the admin password and issues a session cookie.
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Password string `json:"password"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if !auth.CheckPassword(in.Password) {
+		writeErr(w, http.StatusUnauthorized, "invalid password")
+		return
+	}
+	auth.IssueCookie(w)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// logout clears the session cookie.
+func (s *Server) logout(w http.ResponseWriter, _ *http.Request) {
+	auth.ClearCookie(w)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---- handlers ----
@@ -261,6 +300,7 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 		Status:      model.StatusPending,
 		IncludeInfo: in.IncludeInfo,
 		UseNuclei:   useNuclei,
+		Trigger:     model.TriggerManual,
 		CreatedAt:   time.Now().UTC(),
 	}
 	if err := s.store.CreateScan(r.Context(), scan); err != nil {
@@ -532,13 +572,37 @@ func (s *Server) exportScan(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", `attachment; filename="scan-`+id+`.sarif"`)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(b)
+	case "csv":
+		b, err := report.CSV(findings)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", `attachment; filename="scan-`+id+`.csv"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(b)
+	case "pdf":
+		asset := scan.AssetID
+		if a, err := s.store.GetAsset(r.Context(), scan.AssetID); err == nil {
+			asset = a.Name
+		}
+		b, err := report.PDF(asset, *scan, findings)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Header().Set("Content-Disposition", `attachment; filename="scan-`+id+`.pdf"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(b)
 	case "", "json":
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Disposition", `attachment; filename="scan-`+id+`.json"`)
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]any{"scan": scan, "findings": findings})
 	default:
-		writeErr(w, http.StatusBadRequest, "unknown format (use json or sarif)")
+		writeErr(w, http.StatusBadRequest, "unknown format (use json, sarif, csv or pdf)")
 	}
 }
 
@@ -590,11 +654,22 @@ func (c *sevCounts) add(sev model.Severity) {
 	c.Total++
 }
 
-// stats builds the aggregate dashboard: current exposure (latest completed scan
-// per asset) by severity and per project, triage breakdown, and a severity
-// trend over the most recent completed scans.
+// grpItem is one breakdown row (a project or a service) with its severity counts.
+type grpItem struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	sevCounts
+}
+
+// stats builds the aggregate dashboard. Optional query params scope it:
+// ?project=<id> drills into one project (breakdown becomes per-service), and
+// ?asset=<id> drills into one service. Snapshot, triage and trend all honor the
+// scope.
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	projectID := r.URL.Query().Get("project")
+	assetID := r.URL.Query().Get("asset")
+
 	projects, err := s.store.ListProjects(ctx)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -610,34 +685,37 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	trend, err := s.store.SeverityTrend(ctx, 30)
+	trend, err := s.store.SeverityTrend(ctx, projectID, assetID, 30)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// Triage index keyed by assetID + "\x00" + fingerprint.
 	tri := make(map[string]model.TriageStatus, len(triage))
 	for _, t := range triage {
 		tri[t.AssetID+"\x00"+t.Fingerprint] = t.Status
 	}
 
-	type projStat struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-		sevCounts
+	// Breakdown dimension: no project → per project; a project → per service; a
+	// single service → no breakdown.
+	breakdownBy := "project"
+	if projectID != "" {
+		breakdownBy = "asset"
 	}
-	perProject := map[string]*projStat{}
-	names := map[string]string{}
-	for _, p := range projects {
-		names[p.ID] = p.Name
-		perProject[p.ID] = &projStat{ID: p.ID, Name: p.Name}
+	if assetID != "" {
+		breakdownBy = ""
 	}
 
-	assetCount := 0
-	for _, p := range projects {
-		if as, err := s.store.ListAssets(ctx, p.ID); err == nil {
-			assetCount += len(as)
+	groups := map[string]*grpItem{}
+	if breakdownBy == "project" {
+		for _, p := range projects {
+			groups[p.ID] = &grpItem{ID: p.ID, Name: p.Name}
+		}
+	} else if breakdownBy == "asset" {
+		if as, err := s.store.ListAssets(ctx, projectID); err == nil {
+			for _, a := range as {
+				groups[a.ID] = &grpItem{ID: a.ID, Name: a.Name}
+			}
 		}
 	}
 
@@ -650,9 +728,21 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	}{}
 
 	for _, cf := range current {
+		if projectID != "" && cf.ProjectID != projectID {
+			continue
+		}
+		if assetID != "" && cf.AssetID != assetID {
+			continue
+		}
 		overall.add(cf.Severity)
-		if ps := perProject[cf.ProjectID]; ps != nil {
-			ps.add(cf.Severity)
+		if breakdownBy == "project" {
+			if g := groups[cf.ProjectID]; g != nil {
+				g.add(cf.Severity)
+			}
+		} else if breakdownBy == "asset" {
+			if g := groups[cf.AssetID]; g != nil {
+				g.add(cf.Severity)
+			}
 		}
 		switch tri[cf.AssetID+"\x00"+cf.Fingerprint] {
 		case model.TriageFalsePositive:
@@ -666,9 +756,27 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	projList := make([]*projStat, 0, len(projects))
-	for _, p := range projects {
-		projList = append(projList, perProject[p.ID])
+	breakdown := make([]*grpItem, 0, len(groups))
+	for _, g := range groups {
+		breakdown = append(breakdown, g)
+	}
+	sort.Slice(breakdown, func(i, j int) bool { return breakdown[i].Name < breakdown[j].Name })
+
+	// Assets in scope.
+	assetCount := 0
+	switch {
+	case assetID != "":
+		assetCount = 1
+	case projectID != "":
+		if as, err := s.store.ListAssets(ctx, projectID); err == nil {
+			assetCount = len(as)
+		}
+	default:
+		for _, p := range projects {
+			if as, err := s.store.ListAssets(ctx, p.ID); err == nil {
+				assetCount += len(as)
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -677,11 +785,159 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 			"assets":   assetCount,
 			"findings": overall.Total,
 		},
-		"severity": overall,
-		"triage":   triageCounts,
-		"projects": projList,
-		"trend":    trend,
+		"severity":     overall,
+		"triage":       triageCounts,
+		"breakdown_by": breakdownBy,
+		"breakdown":    breakdown,
+		"trend":        trend,
 	})
+}
+
+// findingRow is a current finding enriched for the global findings view.
+type findingRow struct {
+	ProjectID   string         `json:"project_id"`
+	ProjectName string         `json:"project_name"`
+	AssetID     string         `json:"asset_id"`
+	AssetName   string         `json:"asset_name"`
+	Scanner     string         `json:"scanner"`
+	Severity    model.Severity `json:"severity"`
+	Title       string         `json:"title"`
+	Host        string         `json:"host"`
+	Port        int            `json:"port"`
+	Fingerprint string         `json:"fingerprint"`
+	Status      string         `json:"status"`
+}
+
+// findings is the global, filterable list of current findings (latest completed
+// scan per asset). Query params: project, asset, severity, scanner, status, q.
+func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	cur, err := s.store.CurrentFindings(ctx)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	triage, err := s.store.ListAllTriage(ctx)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	tri := make(map[string]model.TriageStatus, len(triage))
+	for _, t := range triage {
+		tri[t.AssetID+"\x00"+t.Fingerprint] = t.Status
+	}
+
+	q := r.URL.Query()
+	fProject := q.Get("project")
+	fAsset := q.Get("asset")
+	fSeverity := q.Get("severity")
+	fScanner := q.Get("scanner")
+	fStatus := q.Get("status")
+	fText := strings.ToLower(strings.TrimSpace(q.Get("q")))
+
+	out := make([]findingRow, 0, len(cur))
+	for _, cf := range cur {
+		status := string(model.TriageOpen)
+		if st, ok := tri[cf.AssetID+"\x00"+cf.Fingerprint]; ok {
+			status = string(st)
+		}
+		if fProject != "" && cf.ProjectID != fProject {
+			continue
+		}
+		if fAsset != "" && cf.AssetID != fAsset {
+			continue
+		}
+		if fSeverity != "" && string(cf.Severity) != fSeverity {
+			continue
+		}
+		if fScanner != "" && cf.Scanner != fScanner {
+			continue
+		}
+		if fStatus != "" && status != fStatus {
+			continue
+		}
+		if fText != "" && !strings.Contains(strings.ToLower(cf.Title), fText) &&
+			!strings.Contains(strings.ToLower(cf.Host), fText) {
+			continue
+		}
+		out = append(out, findingRow{
+			ProjectID: cf.ProjectID, ProjectName: cf.ProjectName,
+			AssetID: cf.AssetID, AssetName: cf.AssetName,
+			Scanner: cf.Scanner, Severity: cf.Severity, Title: cf.Title,
+			Host: cf.Host, Port: cf.Port, Fingerprint: cf.Fingerprint, Status: status,
+		})
+	}
+	// Severity desc, then title.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Severity.Rank() != out[j].Severity.Rank() {
+			return out[i].Severity.Rank() > out[j].Severity.Rank()
+		}
+		return out[i].Title < out[j].Title
+	})
+	writeJSON(w, http.StatusOK, out)
+}
+
+// secretSettings holds the setting keys whose values are encrypted at rest and
+// never returned in plaintext by the API.
+var secretSettings = map[string]bool{
+	"smtp_pass": true,
+}
+
+// settingsResponse is the masked view of the settings: non-secret values inline,
+// secrets reported only as present/absent.
+func settingsResponse(all map[string]string) map[string]any {
+	values := map[string]string{}
+	secretsSet := map[string]bool{}
+	for k, v := range all {
+		if secretSettings[k] {
+			secretsSet[k] = v != ""
+		} else {
+			values[k] = v
+		}
+	}
+	return map[string]any{"settings": values, "secrets_set": secretsSet}
+}
+
+func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
+	all, err := s.store.AllSettings(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, settingsResponse(all))
+}
+
+// putSettings upserts a flat {key: value} map. Secret keys are encrypted before
+// storage; an empty value for a secret leaves the existing one unchanged (so the
+// UI can submit without re-entering the password).
+func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
+	var in map[string]string
+	if !readJSON(w, r, &in) {
+		return
+	}
+	for k, v := range in {
+		if secretSettings[k] {
+			if v == "" {
+				continue // keep the stored secret
+			}
+			enc, err := secret.Encrypt(v)
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			v = enc
+		}
+		if err := s.store.SetSetting(r.Context(), k, v); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	all, err := s.store.AllSettings(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, settingsResponse(all))
 }
 
 // ---- helpers ----

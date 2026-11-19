@@ -17,11 +17,13 @@ import (
 	"time"
 
 	"github.com/RodriguesWall/aegis-recon/internal/api"
+	"github.com/RodriguesWall/aegis-recon/internal/config"
 	"github.com/RodriguesWall/aegis-recon/internal/model"
 	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/queue"
 	"github.com/RodriguesWall/aegis-recon/internal/scansvc"
 	"github.com/RodriguesWall/aegis-recon/internal/scheduler"
+	"github.com/RodriguesWall/aegis-recon/internal/secret"
 	"github.com/RodriguesWall/aegis-recon/internal/store/sqlite"
 	"github.com/RodriguesWall/aegis-recon/internal/version"
 )
@@ -39,8 +41,17 @@ func main() {
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	addr := envOr("AEGIS_ADDR", "127.0.0.1:8080")
-	dbPath := envOr("AEGIS_DB", filepath.Join("db", "aegis.db"))
+	if secret.UsingBakedKey() {
+		logger.Warn("AEGIS_SECRET_KEY not set — stored secrets use a weak baked key; set AEGIS_SECRET_KEY in production")
+	}
+
+	cfg, err := config.Resolve(envOr("AEGIS_CONFIG", "aegis.yaml"))
+	if err != nil {
+		logger.Error("config", "err", err)
+		os.Exit(1)
+	}
+	addr := cfg.Addr
+	dbPath := cfg.DB
 
 	// Keep the SQLite files in their own directory instead of the project root.
 	if dir := filepath.Dir(dbPath); dir != "" && dir != "." {

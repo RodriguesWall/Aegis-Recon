@@ -94,6 +94,8 @@ func (s *Scheduler) RunDue(ctx context.Context, now time.Time) (int, error) {
 				AssetID:   sc.AssetID,
 				Type:      model.ScanSurface,
 				Status:    model.StatusPending,
+				UseNuclei: true,
+				Trigger:   model.TriggerScheduled,
 				CreatedAt: now.UTC(),
 			}
 			if err := s.store.CreateScan(ctx, scan); err != nil {

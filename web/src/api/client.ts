@@ -1,11 +1,13 @@
 import type {
   Asset,
+  FindingRow,
   Progress,
   Project,
   Scan,
   ScanDiff,
   ScanResult,
   Schedule,
+  SettingsData,
   Stats,
   Triage,
   TriageStatus,
@@ -35,7 +37,29 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  getStats: () => req<Stats>("/stats"),
+  getAuth: () => req<{ enabled: boolean; authenticated: boolean }>("/auth"),
+  login: (password: string) =>
+    req<{ ok: boolean }>("/login", { method: "POST", body: JSON.stringify({ password }) }),
+  logout: () => req<void>("/logout", { method: "POST" }),
+  getStats: (projectID = "", assetID = "") => {
+    const q = new URLSearchParams()
+    if (projectID) q.set("project", projectID)
+    if (assetID) q.set("asset", assetID)
+    const qs = q.toString()
+    return req<Stats>("/stats" + (qs ? "?" + qs : ""))
+  },
+  listFindings: (f: { project?: string; severity?: string; status?: string; q?: string }) => {
+    const p = new URLSearchParams()
+    if (f.project) p.set("project", f.project)
+    if (f.severity) p.set("severity", f.severity)
+    if (f.status) p.set("status", f.status)
+    if (f.q) p.set("q", f.q)
+    const qs = p.toString()
+    return req<FindingRow[]>("/findings" + (qs ? "?" + qs : ""))
+  },
+  getSettings: () => req<SettingsData>("/settings"),
+  updateSettings: (body: Record<string, string>) =>
+    req<SettingsData>("/settings", { method: "PUT", body: JSON.stringify(body) }),
   listProjects: () => req<Project[]>("/projects"),
   createProject: (name: string) =>
     req<Project>("/projects", { method: "POST", body: JSON.stringify({ name }) }),
@@ -75,7 +99,7 @@ export const api = {
 
   // Download URL for a scan export; the server sets Content-Disposition so the
   // browser saves the file.
-  exportScanURL: (scanID: string, format: "json" | "sarif") =>
+  exportScanURL: (scanID: string, format: "json" | "sarif" | "csv" | "pdf") =>
     `${BASE}/scans/${scanID}/export?format=${format}`,
 
   // Health/version. /health is at the root (not under /api); best-effort.
