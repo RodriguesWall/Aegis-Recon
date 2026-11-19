@@ -119,6 +119,7 @@ function AssetCard({
   const [scanToDelete, setScanToDelete] = useState<string | null>(null)
   const [includeInfo, setIncludeInfo] = useState(false)
   const [useNuclei, setUseNuclei] = useState(true)
+  const [intrusive, setIntrusive] = useState(false)
 
   async function save() {
     const n = draft.trim()
@@ -132,7 +133,7 @@ function AssetCard({
   }
 
   async function runScan() {
-    const scan = await api.createScan(asset.id, includeInfo, useNuclei)
+    const scan = await api.createScan(asset.id, includeInfo, useNuclei, useNuclei && intrusive)
     navigate(`/scans/${scan.id}`)
   }
 
@@ -195,6 +196,19 @@ function AssetCard({
           onChange={(e) => setUseNuclei(e.target.checked)}
         />
         Run Nuclei vulnerability checks (active; skipped if not installed)
+      </label>
+      <label
+        className={`mt-1 flex items-center gap-2 text-xs ${
+          useNuclei ? "text-sev-high" : "text-muted opacity-50"
+        }`}
+      >
+        <input
+          type="checkbox"
+          disabled={!useNuclei}
+          checked={useNuclei && intrusive}
+          onChange={(e) => setIntrusive(e.target.checked)}
+        />
+        Intrusive mode (fuzzing / user-enum via Nuclei) — authorized targets only
       </label>
 
       {scans.length > 0 && (

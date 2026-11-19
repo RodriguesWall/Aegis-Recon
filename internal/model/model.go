@@ -108,6 +108,11 @@ type Scan struct {
 	// UseNuclei runs the external nuclei vulnerability checks in addition to the
 	// native recon modules. Default true; still a no-op if the binary is absent.
 	UseNuclei bool `json:"use_nuclei"`
+	// Intrusive relaxes the nuclei safety profile for this scan: it allows the
+	// intrusive/fuzzing template classes and enables DAST fuzzing (active checks
+	// such as user enumeration). DoS templates stay excluded. Default false and
+	// only effective together with UseNuclei. Authorized-use only.
+	Intrusive bool `json:"intrusive"`
 	// Trigger records what started the scan: "manual" (user/API) or "scheduled"
 	// (the interval scheduler). Drives notification scope.
 	Trigger     string     `json:"trigger"`

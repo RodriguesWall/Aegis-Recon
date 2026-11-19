@@ -148,7 +148,8 @@ func (s *Service) Run(ctx context.Context, scanID string) (err error) {
 	scanners := s.scanners
 	if scan.UseNuclei && nuclei.Available(s.nucleiBin) {
 		scanners = append(append([]model.Scanner{}, s.scanners...),
-			nuclei.New(nuclei.WithBin(s.nucleiBin), nuclei.WithTemplates(s.nucleiTemplates)))
+			nuclei.New(nuclei.WithBin(s.nucleiBin), nuclei.WithTemplates(s.nucleiTemplates),
+				nuclei.WithIntrusive(scan.Intrusive)))
 		if s.logger != nil {
 			s.logger.Info("nuclei enabled for scan", "scan", scanID)
 		}

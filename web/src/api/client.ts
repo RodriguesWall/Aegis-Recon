@@ -87,10 +87,10 @@ export const api = {
   deleteAsset: (id: string) => req<void>(`/assets/${id}`, { method: "DELETE" }),
 
   listScans: (assetID: string) => req<Scan[]>(`/assets/${assetID}/scans`),
-  createScan: (assetID: string, includeInfo = false, useNuclei = true) =>
+  createScan: (assetID: string, includeInfo = false, useNuclei = true, intrusive = false) =>
     req<Scan>(`/assets/${assetID}/scans`, {
       method: "POST",
-      body: JSON.stringify({ include_info: includeInfo, use_nuclei: useNuclei }),
+      body: JSON.stringify({ include_info: includeInfo, use_nuclei: useNuclei, intrusive }),
     }),
   getScan: (scanID: string) => req<ScanResult>(`/scans/${scanID}`),
   getProgress: (scanID: string) => req<Progress>(`/scans/${scanID}/progress`),

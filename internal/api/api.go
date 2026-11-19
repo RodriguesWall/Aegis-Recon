@@ -285,6 +285,7 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		IncludeInfo bool  `json:"include_info"`
 		UseNuclei   *bool `json:"use_nuclei"`
+		Intrusive   bool  `json:"intrusive"`
 	}
 	if r.ContentLength != 0 && r.Body != nil {
 		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in)
@@ -293,6 +294,8 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 	if in.UseNuclei != nil {
 		useNuclei = *in.UseNuclei
 	}
+	// Intrusive only means anything with nuclei running.
+	intrusive := in.Intrusive && useNuclei
 	scan := &model.Scan{
 		ID:          uuid.NewString(),
 		AssetID:     assetID,
@@ -300,6 +303,7 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 		Status:      model.StatusPending,
 		IncludeInfo: in.IncludeInfo,
 		UseNuclei:   useNuclei,
+		Intrusive:   intrusive,
 		Trigger:     model.TriggerManual,
 		CreatedAt:   time.Now().UTC(),
 	}
