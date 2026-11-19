@@ -47,6 +47,7 @@ export interface Finding {
   title: string
   evidence?: Record<string, unknown>
   fingerprint: string
+  remediation?: string
 }
 
 export type TriageStatus = "open" | "false-positive" | "accepted-risk" | "fixed"
@@ -110,6 +111,7 @@ export interface FindingRow {
   port: number
   fingerprint: string
   status: string
+  remediation?: string
 }
 
 export interface SettingsData {

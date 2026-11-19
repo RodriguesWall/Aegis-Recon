@@ -260,6 +260,11 @@ export function ScanDetail() {
                         {f.scanner}
                         {f.evidence ? " · " + shortEvidence(f.evidence) : ""}
                       </p>
+                      {f.remediation && (
+                        <p className="mt-0.5 text-xs" style={{ color: "#86efac" }}>
+                          Fix: {f.remediation}
+                        </p>
+                      )}
                     </div>
                     <TriageControl
                       assetID={scan.asset_id}

@@ -87,6 +87,11 @@ export function Findings() {
                   {f.host}
                   {f.port ? ":" + f.port : ""} · {f.scanner} · {f.project_name} / {f.asset_name}
                 </p>
+                {f.remediation && (
+                  <p className="mt-0.5 text-xs" style={{ color: "#86efac" }}>
+                    Fix: {f.remediation}
+                  </p>
+                )}
               </div>
               {f.status !== "open" && (
                 <span className="whitespace-nowrap text-xs text-muted">{f.status}</span>

@@ -376,12 +376,13 @@ func (s *Server) getScan(w http.ResponseWriter, r *http.Request) {
 type findingDTO struct {
 	model.Finding
 	Fingerprint string `json:"fingerprint"`
+	Remediation string `json:"remediation,omitempty"`
 }
 
 func withFingerprints(fs []model.Finding) []findingDTO {
 	out := make([]findingDTO, len(fs))
 	for i, f := range fs {
-		out[i] = findingDTO{Finding: f, Fingerprint: f.Fingerprint()}
+		out[i] = findingDTO{Finding: f, Fingerprint: f.Fingerprint(), Remediation: report.Remediation(f)}
 	}
 	return out
 }
@@ -831,6 +832,7 @@ type findingRow struct {
 	Port        int            `json:"port"`
 	Fingerprint string         `json:"fingerprint"`
 	Status      string         `json:"status"`
+	Remediation string         `json:"remediation,omitempty"`
 }
 
 // findings is the global, filterable list of current findings (latest completed
@@ -890,6 +892,7 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 			AssetID: cf.AssetID, AssetName: cf.AssetName,
 			Scanner: cf.Scanner, Severity: cf.Severity, Title: cf.Title,
 			Host: cf.Host, Port: cf.Port, Fingerprint: cf.Fingerprint, Status: status,
+			Remediation: report.Remediation(model.Finding{Scanner: cf.Scanner, Severity: cf.Severity, Title: cf.Title}),
 		})
 	}
 	// Severity desc, then title.

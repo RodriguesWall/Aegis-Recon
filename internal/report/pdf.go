@@ -215,6 +215,12 @@ func finding(pdf *fpdf.Fpdf, tr func(string) string, f model.Finding) {
 		meta += "  ·  " + ev
 	}
 	pdf.MultiCell(157, 4, tr(meta), "", "L", false)
+	if rem := Remediation(f); rem != "" {
+		setText(pdf, rgb{80, 110, 70})
+		pdf.SetFont("Helvetica", "I", 8)
+		pdf.SetX(x + 23)
+		pdf.MultiCell(157, 4, tr("Fix: "+rem), "", "L", false)
+	}
 	pdf.Ln(1.5)
 }
 
