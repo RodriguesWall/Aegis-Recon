@@ -28,6 +28,7 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/httpprobe"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/infoleak"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/methods"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/openapi"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/openredirect"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/nuclei"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/port"
@@ -73,6 +74,7 @@ func New(st store.Store, tracker *progress.Tracker, logger *slog.Logger) *Servic
 			openredirect.New(),
 			hostheader.New(),
 			infoleak.New(),
+			openapi.New(),
 		},
 		discoverers:     []model.Discoverer{subdomain.New(resolver)},
 		nucleiBin:       envOr("AEGIS_NUCLEI_BIN", "nuclei"),
