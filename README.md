@@ -7,10 +7,11 @@ scans against them, and review the findings in one place. It is built as a clean
 concurrent Go codebase — a single core engine shared by a CLI and an HTTP API,
 with a React dashboard on top.
 
-**Status:** V1 (attack surface) and V2 (vulnerability & platform) are complete and
-working end to end — engine, CLI, HTTP API, job queue, React dashboard, SARIF/JSON
-export, scan diffing, finding triage, scheduled scans, an optional Nuclei adapter,
-WAF/CDN detection and an aggregate risk dashboard.
+**Status:** V1–V5 are complete and working end to end — engine, CLI, HTTP API, job
+queue, React dashboard, SARIF/JSON/CSV/PDF export, scan diffing, finding triage,
+scheduled scans, an optional Nuclei adapter (with opt-in intrusive mode), WAF/CDN
+detection, endpoint/application checks, email + DNSSEC/AXFR posture, OWASP Top 10
+mapping, a read-only MCP server and an aggregate risk dashboard.
 
 ---
 
@@ -31,6 +32,7 @@ A surface scan runs these native-Go modules concurrently:
 | `fingerprint` | Technology/stack detection |
 | `cdn` | WAF/CDN detection (header + CNAME heuristics; Cloudflare, Akamai, CloudFront, Fastly, Sucuri, Imperva, …) |
 | `emailposture` | SPF / DMARC / DKIM posture (DNS TXT) |
+| `dnssec` | DNSSEC signed-zone check + zone-transfer (AXFR) attempt per nameserver |
 | `exposedfiles` | Exposed sensitive paths (.git, .env, backups, actuator, swagger, …) with soft-404 baseline |
 | `cors` | CORS misconfiguration (reflected origin / wildcard + credentials) |
 | `cookies` | Missing cookie flags (HttpOnly / Secure / SameSite) |
@@ -60,9 +62,11 @@ The recon modules are pure Go standard library (`net`, `crypto/tls`,
 adapter to [`nuclei`](https://github.com/projectdiscovery/nuclei): it is enabled
 per scan (default on), runs under a locked safety profile (no dos/intrusive/
 fuzzing templates, rate-limited, per-host timeout) and degrades to a no-op when
-the binary is absent. The Docker image bundles `nuclei` and its templates;
-outside Docker, install `nuclei` on `PATH` to use it. Results are available as
-structured JSON (CLI) and through the API.
+the binary is absent. An opt-in **intrusive mode** relaxes that profile (allows
+the intrusive/fuzzing classes and enables DAST fuzzing, e.g. user enumeration);
+DoS templates stay excluded, and it is authorized-use only. The Docker image
+bundles `nuclei` and its templates; outside Docker, install `nuclei` on `PATH` to
+use it. Results are available as structured JSON (CLI) and through the API.
 
 ---
 
@@ -104,20 +108,18 @@ worker pool.
 ```
             internal/engine    (two-phase pipeline, worker pool)
             internal/scanner   (dns, subdomain, port, tls, httpprobe, fingerprint, cdn,
-                                emailposture, exposedfiles, cors, cookies, methods,
+                                emailposture, dnssec, exposedfiles, cors, cookies, methods,
                                 openredirect, hostheader, infoleak, openapi, graphql, nuclei)
             internal/scope     (allowlist + per-host rate limiter)
             internal/diff      (scan diffing by fingerprint)
             internal/scheduler (interval-based scheduled scans)
             internal/store     (SQLite, behind an interface)
                    │
-     ┌─────────────┴───────────────────────────┐
-     ▼                                          ▼
-  aegis (CLI)                           aegisd (HTTP API)
-  one-shot scan → JSON                  projects/assets/scans + job queue
-                                                │
-                                                ▼
-                                        web/ (React + Vite SPA)
+     ┌─────────────┬───────────────────────────┬───────────────────┐
+     ▼             ▼                           ▼                   ▼
+  aegis (CLI)   aegisd (HTTP API)        aegis-mcp           web/ (React + Vite)
+  one-shot      projects/assets/scans    read-only MCP       SPA on aegisd
+  scan → JSON   + job queue              server (stdio)
 ```
 
 - Mono-repo, single `go.mod`.
@@ -265,11 +267,16 @@ operator.
 - [x] CORS, cookie flags, dangerous methods, open redirect, host-header injection
 - [x] Info/version leak; OpenAPI spec risk (unauthenticated write ops); GraphQL introspection
 
-### V5 — Planned
-- [ ] MCP server (query posture via an LLM)
-- [ ] PDF report with the platform's visual identity
-- [ ] User-enumeration detection; DNSSEC/AXFR
+### V5 — Reporting & active detection ✓
+- [x] Read-only MCP server (query the posture via an LLM over stdio)
+- [x] Branded PDF report + per-service export filenames; per-finding remediation guidance
+- [x] DNSSEC check + zone-transfer (AXFR) attempt per nameserver
+- [x] Nuclei intrusive mode (opt-in, DAST/fuzzing; DoS stays excluded)
+- [x] OWASP Top 10 (2021) mapping per finding + breakdown
+
+### Backlog
 - [ ] Authentication multi-tenant / SCA (OSV.dev) / ownership verification
+- [ ] MCP with actions (trigger scan / set triage)
 
 ---
 

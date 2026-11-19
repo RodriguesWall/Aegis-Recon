@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS scans (
 	status       TEXT NOT NULL,
 	include_info INTEGER NOT NULL DEFAULT 0,
 	use_nuclei   INTEGER NOT NULL DEFAULT 1,
+	intrusive    INTEGER NOT NULL DEFAULT 0,
 	trigger      TEXT NOT NULL DEFAULT 'manual',
 	created_at   TIMESTAMP NOT NULL,
 	started_at   TIMESTAMP,
@@ -130,6 +131,8 @@ func (s *Store) Migrate(ctx context.Context) error {
 		`ALTER TABLE scans ADD COLUMN include_info INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.ExecContext(ctx,
 		`ALTER TABLE scans ADD COLUMN use_nuclei INTEGER NOT NULL DEFAULT 1`)
+	_, _ = s.db.ExecContext(ctx,
+		`ALTER TABLE scans ADD COLUMN intrusive INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.ExecContext(ctx,
 		`ALTER TABLE scans ADD COLUMN trigger TEXT NOT NULL DEFAULT 'manual'`)
 	// Same best-effort add for the finding fingerprint (scan diffing + triage).
@@ -325,9 +328,9 @@ func (s *Store) CreateScan(ctx context.Context, sc *model.Scan) error {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO scans (id, asset_id, type, status, include_info, use_nuclei, trigger, created_at, started_at, completed_at, error)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		sc.ID, sc.AssetID, sc.Type, sc.Status, boolToInt(sc.IncludeInfo), boolToInt(sc.UseNuclei), triggerOr(sc.Trigger), sc.CreatedAt, sc.StartedAt, sc.CompletedAt, sc.Error)
+		`INSERT INTO scans (id, asset_id, type, status, include_info, use_nuclei, intrusive, trigger, created_at, started_at, completed_at, error)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sc.ID, sc.AssetID, sc.Type, sc.Status, boolToInt(sc.IncludeInfo), boolToInt(sc.UseNuclei), boolToInt(sc.Intrusive), triggerOr(sc.Trigger), sc.CreatedAt, sc.StartedAt, sc.CompletedAt, sc.Error)
 	return err
 }
 
@@ -342,20 +345,21 @@ func (s *Store) UpdateScan(ctx context.Context, sc *model.Scan) error {
 
 func (s *Store) GetScan(ctx context.Context, id string) (*model.Scan, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, asset_id, type, status, include_info, use_nuclei, trigger, created_at, started_at, completed_at, error FROM scans WHERE id = ?`, id)
+		`SELECT id, asset_id, type, status, include_info, use_nuclei, intrusive, trigger, created_at, started_at, completed_at, error FROM scans WHERE id = ?`, id)
 	var sc model.Scan
-	var includeInfo, useNuclei int
-	if err := row.Scan(&sc.ID, &sc.AssetID, &sc.Type, &sc.Status, &includeInfo, &useNuclei, &sc.Trigger, &sc.CreatedAt, &sc.StartedAt, &sc.CompletedAt, &sc.Error); err != nil {
+	var includeInfo, useNuclei, intrusive int
+	if err := row.Scan(&sc.ID, &sc.AssetID, &sc.Type, &sc.Status, &includeInfo, &useNuclei, &intrusive, &sc.Trigger, &sc.CreatedAt, &sc.StartedAt, &sc.CompletedAt, &sc.Error); err != nil {
 		return nil, err
 	}
 	sc.IncludeInfo = includeInfo != 0
 	sc.UseNuclei = useNuclei != 0
+	sc.Intrusive = intrusive != 0
 	return &sc, nil
 }
 
 func (s *Store) ListScans(ctx context.Context, assetID string) ([]model.Scan, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, asset_id, type, status, include_info, use_nuclei, trigger, created_at, started_at, completed_at, error
+		`SELECT id, asset_id, type, status, include_info, use_nuclei, intrusive, trigger, created_at, started_at, completed_at, error
 		 FROM scans WHERE asset_id = ? ORDER BY created_at DESC`, assetID)
 	if err != nil {
 		return nil, err
@@ -374,7 +378,7 @@ func (s *Store) ListProcessingScans(ctx context.Context) ([]model.Scan, error) {
 
 func (s *Store) listByStatus(ctx context.Context, status model.ScanStatus) ([]model.Scan, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, asset_id, type, status, include_info, use_nuclei, trigger, created_at, started_at, completed_at, error
+		`SELECT id, asset_id, type, status, include_info, use_nuclei, intrusive, trigger, created_at, started_at, completed_at, error
 		 FROM scans WHERE status = ? ORDER BY created_at`, status)
 	if err != nil {
 		return nil, err
@@ -388,12 +392,13 @@ func scanRows(rows *sql.Rows) ([]model.Scan, error) {
 	var out []model.Scan
 	for rows.Next() {
 		var sc model.Scan
-		var includeInfo, useNuclei int
-		if err := rows.Scan(&sc.ID, &sc.AssetID, &sc.Type, &sc.Status, &includeInfo, &useNuclei, &sc.Trigger, &sc.CreatedAt, &sc.StartedAt, &sc.CompletedAt, &sc.Error); err != nil {
+		var includeInfo, useNuclei, intrusive int
+		if err := rows.Scan(&sc.ID, &sc.AssetID, &sc.Type, &sc.Status, &includeInfo, &useNuclei, &intrusive, &sc.Trigger, &sc.CreatedAt, &sc.StartedAt, &sc.CompletedAt, &sc.Error); err != nil {
 			return nil, err
 		}
 		sc.IncludeInfo = includeInfo != 0
 		sc.UseNuclei = useNuclei != 0
+		sc.Intrusive = intrusive != 0
 		out = append(out, sc)
 	}
 	return out, rows.Err()

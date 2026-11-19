@@ -47,6 +47,8 @@ export interface Finding {
   title: string
   evidence?: Record<string, unknown>
   fingerprint: string
+  remediation?: string
+  owasp?: string
 }
 
 export type TriageStatus = "open" | "false-positive" | "accepted-risk" | "fixed"
@@ -61,6 +63,7 @@ export interface Triage {
 
 export interface ScanResult {
   scan: Scan
+  asset_name?: string
   findings: Finding[] | null
   triage?: Record<string, Triage>
 }
@@ -110,6 +113,8 @@ export interface FindingRow {
   port: number
   fingerprint: string
   status: string
+  remediation?: string
+  owasp?: string
 }
 
 export interface SettingsData {

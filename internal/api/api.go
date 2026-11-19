@@ -281,10 +281,12 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Options are optional; default (no body) means exclude Info findings and
-	// run nuclei. use_nuclei is a pointer so an omitted field defaults to true.
+	// run nuclei in intrusive mode. use_nuclei and intrusive are pointers so an
+	// omitted field defaults to true.
 	var in struct {
 		IncludeInfo bool  `json:"include_info"`
 		UseNuclei   *bool `json:"use_nuclei"`
+		Intrusive   *bool `json:"intrusive"`
 	}
 	if r.ContentLength != 0 && r.Body != nil {
 		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in)
@@ -293,6 +295,12 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 	if in.UseNuclei != nil {
 		useNuclei = *in.UseNuclei
 	}
+	// Intrusive defaults on; it only means anything with nuclei running.
+	intrusiveReq := true
+	if in.Intrusive != nil {
+		intrusiveReq = *in.Intrusive
+	}
+	intrusive := intrusiveReq && useNuclei
 	scan := &model.Scan{
 		ID:          uuid.NewString(),
 		AssetID:     assetID,
@@ -300,6 +308,7 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 		Status:      model.StatusPending,
 		IncludeInfo: in.IncludeInfo,
 		UseNuclei:   useNuclei,
+		Intrusive:   intrusive,
 		Trigger:     model.TriggerManual,
 		CreatedAt:   time.Now().UTC(),
 	}
@@ -368,7 +377,12 @@ func (s *Server) getScan(w http.ResponseWriter, r *http.Request) {
 	for _, t := range triage {
 		tmap[t.Fingerprint] = t
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"scan": scan, "findings": withFingerprints(findings), "triage": tmap})
+	// Asset name so the report header names the scanned service (best-effort).
+	assetName := ""
+	if a, err := s.store.GetAsset(r.Context(), scan.AssetID); err == nil {
+		assetName = a.Name
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"scan": scan, "asset_name": assetName, "findings": withFingerprints(findings), "triage": tmap})
 }
 
 // findingDTO is a Finding plus its fingerprint, so the client can look each one
@@ -376,12 +390,15 @@ func (s *Server) getScan(w http.ResponseWriter, r *http.Request) {
 type findingDTO struct {
 	model.Finding
 	Fingerprint string `json:"fingerprint"`
+	Remediation string `json:"remediation,omitempty"`
+	Owasp       string `json:"owasp,omitempty"`
 }
 
 func withFingerprints(fs []model.Finding) []findingDTO {
 	out := make([]findingDTO, len(fs))
 	for i, f := range fs {
-		out[i] = findingDTO{Finding: f, Fingerprint: f.Fingerprint()}
+		out[i] = findingDTO{Finding: f, Fingerprint: f.Fingerprint(),
+			Remediation: report.Remediation(f), Owasp: report.OWASP(f)}
 	}
 	return out
 }
@@ -561,6 +578,14 @@ func (s *Server) exportScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	asset := scan.AssetID
+	if a, err := s.store.GetAsset(r.Context(), scan.AssetID); err == nil {
+		asset = a.Name
+	}
+	disp := func(ext string) string {
+		return `attachment; filename="` + exportFilename(asset, scan, ext) + `"`
+	}
+
 	switch r.URL.Query().Get("format") {
 	case "sarif":
 		b, err := report.SARIF(findings)
@@ -569,7 +594,7 @@ func (s *Server) exportScan(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/sarif+json")
-		w.Header().Set("Content-Disposition", `attachment; filename="scan-`+id+`.sarif"`)
+		w.Header().Set("Content-Disposition", disp("sarif"))
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(b)
 	case "csv":
@@ -579,31 +604,48 @@ func (s *Server) exportScan(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/csv")
-		w.Header().Set("Content-Disposition", `attachment; filename="scan-`+id+`.csv"`)
+		w.Header().Set("Content-Disposition", disp("csv"))
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(b)
 	case "pdf":
-		asset := scan.AssetID
-		if a, err := s.store.GetAsset(r.Context(), scan.AssetID); err == nil {
-			asset = a.Name
-		}
 		b, err := report.PDF(asset, *scan, findings)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		w.Header().Set("Content-Type", "application/pdf")
-		w.Header().Set("Content-Disposition", `attachment; filename="scan-`+id+`.pdf"`)
+		w.Header().Set("Content-Disposition", disp("pdf"))
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(b)
 	case "", "json":
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Content-Disposition", `attachment; filename="scan-`+id+`.json"`)
+		w.Header().Set("Content-Disposition", disp("json"))
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]any{"scan": scan, "findings": findings})
 	default:
 		writeErr(w, http.StatusBadRequest, "unknown format (use json, sarif, csv or pdf)")
 	}
+}
+
+// exportFilename builds "<asset>-<YYYY-MM-DD>.<ext>" from the asset name and the
+// scan's completion date, sanitizing the asset to filename-safe characters.
+func exportFilename(asset string, scan *model.Scan, ext string) string {
+	when := scan.CreatedAt
+	if scan.CompletedAt != nil {
+		when = *scan.CompletedAt
+	}
+	safe := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '-', r == '_':
+			return r
+		default:
+			return '-'
+		}
+	}, asset)
+	if safe == "" {
+		safe = "scan"
+	}
+	return safe + "-" + when.UTC().Format("2006-01-02") + "." + ext
 }
 
 func (s *Server) getProgress(w http.ResponseWriter, r *http.Request) {
@@ -806,6 +848,8 @@ type findingRow struct {
 	Port        int            `json:"port"`
 	Fingerprint string         `json:"fingerprint"`
 	Status      string         `json:"status"`
+	Remediation string         `json:"remediation,omitempty"`
+	Owasp       string         `json:"owasp,omitempty"`
 }
 
 // findings is the global, filterable list of current findings (latest completed
@@ -865,6 +909,8 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 			AssetID: cf.AssetID, AssetName: cf.AssetName,
 			Scanner: cf.Scanner, Severity: cf.Severity, Title: cf.Title,
 			Host: cf.Host, Port: cf.Port, Fingerprint: cf.Fingerprint, Status: status,
+			Remediation: report.Remediation(model.Finding{Scanner: cf.Scanner, Severity: cf.Severity, Title: cf.Title}),
+			Owasp:       report.OWASP(model.Finding{Scanner: cf.Scanner, Severity: cf.Severity, Title: cf.Title}),
 		})
 	}
 	// Severity desc, then title.

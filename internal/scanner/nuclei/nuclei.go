@@ -28,6 +28,7 @@ type Runner func(ctx context.Context, bin string, args []string) ([]byte, error)
 type Scanner struct {
 	bin       string
 	templates string // optional -templates-directory (e.g. a baked image path)
+	intrusive bool   // relax the safety profile (authorized-use only)
 	runner    Runner
 }
 
@@ -53,6 +54,11 @@ func WithTemplates(dir string) Option {
 		}
 	}
 }
+
+// WithIntrusive relaxes the safety profile: it allows the intrusive/fuzzing
+// template classes and enables DAST fuzzing. DoS templates stay excluded.
+// Authorized-use only; off by default.
+func WithIntrusive(on bool) Option { return func(s *Scanner) { s.intrusive = on } }
 
 // WithRunner injects a custom runner (tests pass canned JSONL).
 func WithRunner(r Runner) Option { return func(s *Scanner) { s.runner = r } }
@@ -81,17 +87,29 @@ func Available(bin string) bool {
 // args is the locked safety profile: skip destructive/noisy template classes,
 // floor the severity at low, rate-limit, and cap per-host time. Active checks,
 // but bounded — in the spirit of the project's no-DoS rules.
+//
+// In intrusive mode the intrusive/fuzzing classes are allowed and DAST fuzzing
+// is enabled (-dast), so active checks like user enumeration can run. DoS
+// templates stay excluded either way (anti-DoS rule); the rate limit and
+// per-host timeout are unchanged.
 func (s *Scanner) args(target string) []string {
+	excludeTags := "dos,intrusive,fuzzing"
+	if s.intrusive {
+		excludeTags = "dos"
+	}
 	a := []string{
 		"-u", target,
 		"-jsonl",  // one JSON object per line
 		"-silent", // results only, no banner
 		"-nc",     // no color
 		"-duc",    // disable auto-update check (no surprise network/templates fetch)
-		"-exclude-tags", "dos,intrusive,fuzzing",
+		"-exclude-tags", excludeTags,
 		"-severity", "low,medium,high,critical",
 		"-rate-limit", "150",
 		"-timeout", "10",
+	}
+	if s.intrusive {
+		a = append(a, "-dast") // enable DAST/fuzzing templates (user-enum etc.)
 	}
 	if s.templates != "" {
 		a = append(a, "-t", s.templates) // run templates from this directory

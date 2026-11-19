@@ -84,6 +84,22 @@ func TestArgsLocked(t *testing.T) {
 	}
 }
 
+func TestArgsIntrusive(t *testing.T) {
+	args := New(WithIntrusive(true)).args("acme.example")
+	// intrusive/fuzzing allowed, but DoS still excluded, and DAST enabled.
+	if !contains(args, "dos") || contains(args, "dos,intrusive,fuzzing") {
+		t.Fatalf("intrusive must exclude only dos: %v", args)
+	}
+	if !contains(args, "-dast") {
+		t.Fatalf("intrusive must enable -dast: %v", args)
+	}
+	// Non-intrusive keeps the locked exclusion and no -dast.
+	normal := New().args("acme.example")
+	if contains(normal, "-dast") || !contains(normal, "dos,intrusive,fuzzing") {
+		t.Fatalf("non-intrusive must keep locked profile: %v", normal)
+	}
+}
+
 func TestArgsWithTemplates(t *testing.T) {
 	args := New(WithTemplates("/opt/nuclei-templates")).args("h")
 	if !contains(args, "-t") || !contains(args, "/opt/nuclei-templates") {

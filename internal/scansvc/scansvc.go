@@ -21,6 +21,7 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/cookies"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/cors"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/dns"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/dnssec"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/emailposture"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/exposedfiles"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/fingerprint"
@@ -147,7 +148,8 @@ func (s *Service) Run(ctx context.Context, scanID string) (err error) {
 	scanners := s.scanners
 	if scan.UseNuclei && nuclei.Available(s.nucleiBin) {
 		scanners = append(append([]model.Scanner{}, s.scanners...),
-			nuclei.New(nuclei.WithBin(s.nucleiBin), nuclei.WithTemplates(s.nucleiTemplates)))
+			nuclei.New(nuclei.WithBin(s.nucleiBin), nuclei.WithTemplates(s.nucleiTemplates),
+				nuclei.WithIntrusive(scan.Intrusive)))
 		if s.logger != nil {
 			s.logger.Info("nuclei enabled for scan", "scan", scanID)
 		}
@@ -167,6 +169,8 @@ func (s *Service) Run(ctx context.Context, scanID string) (err error) {
 	// Domain-level email posture (SPF/DMARC/DKIM): checked once on the root
 	// domain, not per host.
 	findings = append(findings, emailposture.Check(ctx, domain, s.resolver)...)
+	// Raw-DNS posture (DNSSEC + zone-transfer): also domain-level, once.
+	findings = append(findings, dnssec.Check(ctx, domain)...)
 	if !scan.IncludeInfo {
 		findings = dropInfo(findings)
 	}

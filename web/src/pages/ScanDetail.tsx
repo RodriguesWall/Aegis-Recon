@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../api/client"
 import { SeverityBadge, severityRank } from "../components/SeverityBadge"
+import { OwaspBadge } from "../components/OwaspBadge"
 import { StatusPill } from "../components/StatusPill"
 import { TriageControl } from "../components/TriageControl"
 import type { Finding, Progress, ScanDiff, ScanResult, Triage } from "../types"
@@ -145,7 +146,7 @@ export function ScanDetail() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-3xl">
-            <span className="gradient-text">Scan</span>
+            <span className="gradient-text">{data.asset_name || "Scan"}</span>
           </h1>
           <p className="flex items-center gap-2 text-muted">
             Status: <StatusPill status={scan.status} />
@@ -255,11 +256,19 @@ export function ScanDetail() {
                   >
                     <SeverityBadge severity={f.severity} />
                     <div className="min-w-0 flex-1">
-                      <p className="text-white">{f.title}</p>
+                      <p className="flex items-center gap-2 text-white">
+                        <span className="min-w-0 truncate">{f.title}</span>
+                        <OwaspBadge code={f.owasp} />
+                      </p>
                       <p className="text-xs text-muted">
                         {f.scanner}
                         {f.evidence ? " · " + shortEvidence(f.evidence) : ""}
                       </p>
+                      {f.remediation && (
+                        <p className="mt-0.5 text-xs" style={{ color: "#86efac" }}>
+                          Fix: {f.remediation}
+                        </p>
+                      )}
                     </div>
                     <TriageControl
                       assetID={scan.asset_id}
@@ -335,9 +344,10 @@ function DownloadMenu({ scanID }: { scanID: string }) {
   const [open, setOpen] = useState(false)
 
   function download(format: "json" | "sarif" | "csv" | "pdf") {
+    // No `download` attr: the server's Content-Disposition names the file
+    // (<asset>-<date>.<ext>); the attachment header still forces a download.
     const a = document.createElement("a")
     a.href = api.exportScanURL(scanID, format)
-    a.download = `scan-${scanID}.${format}`
     document.body.appendChild(a)
     a.click()
     a.remove()

@@ -205,7 +205,7 @@ func TestExportScan(t *testing.T) {
 	if ct := w.Header().Get("Content-Type"); ct != "application/sarif+json" {
 		t.Errorf("sarif content-type = %q", ct)
 	}
-	if cd := w.Header().Get("Content-Disposition"); !strings.Contains(cd, "scan-s1.sarif") {
+	if cd := w.Header().Get("Content-Disposition"); !strings.Contains(cd, "example.com-") || !strings.Contains(cd, ".sarif") {
 		t.Errorf("sarif disposition = %q", cd)
 	}
 	if !strings.Contains(w.Body.String(), `"version": "2.1.0"`) {
@@ -217,7 +217,7 @@ func TestExportScan(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("json export: %d %s", w.Code, w.Body)
 	}
-	if cd := w.Header().Get("Content-Disposition"); !strings.Contains(cd, "scan-s1.json") {
+	if cd := w.Header().Get("Content-Disposition"); !strings.Contains(cd, "example.com-") || !strings.Contains(cd, ".json") {
 		t.Errorf("json disposition = %q", cd)
 	}
 
