@@ -8,4 +8,4 @@
 package version
 
 // Version is the build version. Overridden via -ldflags at build time.
-var Version = "1.0.3"
+var Version = "1.0.4"

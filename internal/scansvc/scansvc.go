@@ -18,11 +18,19 @@ import (
 	"github.com/RodriguesWall/aegis-recon/internal/notify"
 	"github.com/RodriguesWall/aegis-recon/internal/progress"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/cdn"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/cookies"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/cors"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/dns"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/emailposture"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/exposedfiles"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/fingerprint"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/graphql"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/hostheader"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/httpprobe"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/infoleak"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/methods"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/openapi"
+	"github.com/RodriguesWall/aegis-recon/internal/scanner/openredirect"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/nuclei"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/port"
 	"github.com/RodriguesWall/aegis-recon/internal/scanner/subdomain"
@@ -61,6 +69,14 @@ func New(st store.Store, tracker *progress.Tracker, logger *slog.Logger) *Servic
 			fingerprint.New(),
 			cdn.New(resolver),
 			exposedfiles.New(),
+			cors.New(),
+			cookies.New(),
+			methods.New(),
+			openredirect.New(),
+			hostheader.New(),
+			infoleak.New(),
+			openapi.New(),
+			graphql.New(),
 		},
 		discoverers:     []model.Discoverer{subdomain.New(resolver)},
 		nucleiBin:       envOr("AEGIS_NUCLEI_BIN", "nuclei"),
